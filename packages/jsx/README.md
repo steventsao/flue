@@ -60,6 +60,8 @@ export default toDefinition(
 | `<Agent name=… …>` (nested) | an `AgentProfile` in the parent's `subagents` — recursive |
 | `<Subagent name=… …>` | _deprecated_ — explicit alias for a nested `<Agent>` |
 | `<Tool def={…} />` | a `ToolDefinition` in `tools` |
+| `<Tool name=… description=… run={…} />` | inline-authored tool (compiles to `defineTool`) |
+| `<Tool capability=… ><Engine name=… default run={…}/>…</Tool>` | a **modelSlot** — one capability, swappable engines, optional runtime `select` |
 | `<Action def={…} />` | an action in `actions` |
 | `<Skill def={…} />` | a `Skill` in `skills` |
 | `component(value)` | lifts a Flue value into a JSX component |

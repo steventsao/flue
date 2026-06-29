@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { defineAgentProfile, defineAgent, defineTool } from '@flue/runtime';
 import type { AgentDefinition, ToolDefinition } from '@flue/runtime';
-import { Agent, Subagent, Tool, component, toDefinition, toProfile } from '../src/index.ts';
+import { Agent, Engine, Subagent, Tool, component, toDefinition, toProfile } from '../src/index.ts';
 
 const M = 'anthropic/claude-haiku-4-5';
 
@@ -76,6 +76,46 @@ describe('<Agent> ≡ defineAgent()', () => {
 		expect(await config(jsx)).toEqual(await config(ref));
 	});
 
+	it('authors a tool INLINE (<Tool name … run …/>) equal to defineTool', async () => {
+		const run = async () => 'x';
+		const jsx = toDefinition(
+			<Agent model={M}>
+				<Tool name="lookup" description="Look up a value." run={run} />
+			</Agent>,
+		);
+		const ref = defineAgent(() => ({
+			model: M,
+			tools: [defineTool({ name: 'lookup', description: 'Look up a value.', run })],
+		}));
+		expect(await config(jsx)).toEqual(await config(ref));
+	});
+
+	it('authors a tool both ways — <Tool def> and inline <Tool {…}> — identically', async () => {
+		const run = async () => 'x';
+		const spec = { name: 'lookup', description: 'Look up a value.', run } as const;
+		const wrapped = toDefinition(
+			<Agent model={M}>
+				<Tool def={defineTool(spec)} />
+			</Agent>,
+		);
+		const inline = toDefinition(
+			<Agent model={M}>
+				<Tool name="lookup" description="Look up a value." run={run} />
+			</Agent>,
+		);
+		expect(await config(inline)).toEqual(await config(wrapped));
+	});
+
+	it('inline <Tool> inherits defineTool validation (missing run)', () => {
+		expect(() =>
+			toDefinition(
+				<Agent model={M}>
+					<Tool name="broken" description="No run." />
+				</Agent>,
+			),
+		).toThrow('run must be a function');
+	});
+
 	it('compiles <Tool def> children to the same tools array', async () => {
 		const t = createTool('lookup');
 		const jsx = toDefinition(
@@ -101,6 +141,80 @@ describe('<Agent> ≡ defineAgent()', () => {
 });
 
 // ── vice versa: lift an existing Flue value into <MyAgent/> ──
+
+// The okra unlock: a stable capability with swappable engines, authored in one
+// element. Default resolved at authoring; runtime selection inside the run thunk.
+describe('<Tool capability> modelSlot — the swap mechanic', () => {
+	const signal = new AbortController().signal;
+
+	async function slotTool(node: unknown) {
+		const cfg = await config(toDefinition(node));
+		// biome-ignore lint/suspicious/noExplicitAny: test reaches into the resolved tool
+		return cfg.tools![0] as any;
+	}
+
+	it('dispatches to the default engine when none is selected', async () => {
+		const tool = await slotTool(
+			<Agent model={M}>
+				<Tool capability="parse" io="page-image -> md+json">
+					<Engine name="gemini-flash" default run={async () => 'G'} />
+					<Engine name="qwen-vl" run={async () => 'Q'} />
+				</Tool>
+			</Agent>,
+		);
+		expect(tool.name).toBe('parse');
+		expect(await tool.run({ input: undefined, signal })).toBe('G');
+	});
+
+	it('dispatches via the runtime select() thunk', async () => {
+		const tool = await slotTool(
+			<Agent model={M}>
+				<Tool
+					capability="parse"
+					select={(input: { scanned?: boolean }) => (input.scanned ? 'qwen-vl' : 'gemini-flash')}
+				>
+					<Engine name="gemini-flash" default run={async () => 'G'} />
+					<Engine name="qwen-vl" run={async () => 'Q'} />
+				</Tool>
+			</Agent>,
+		);
+		expect(await tool.run({ input: { scanned: true }, signal })).toBe('Q');
+		expect(await tool.run({ input: { scanned: false }, signal })).toBe('G');
+	});
+
+	it('rejects a duplicate engine at mount time', () => {
+		expect(() =>
+			toDefinition(
+				<Agent model={M}>
+					<Tool capability="parse">
+						<Engine name="x" run={async () => 1} />
+						<Engine name="x" run={async () => 2} />
+					</Tool>
+				</Agent>,
+			),
+		).toThrow('duplicate engine');
+	});
+
+	it('rejects multiple defaults and an empty slot at mount time', () => {
+		expect(() =>
+			toDefinition(
+				<Agent model={M}>
+					<Tool capability="parse">
+						<Engine name="a" default run={async () => 1} />
+						<Engine name="b" default run={async () => 2} />
+					</Tool>
+				</Agent>,
+			),
+		).toThrow('multiple default');
+		expect(() =>
+			toDefinition(
+				<Agent model={M}>
+					<Tool capability="parse" />
+				</Agent>,
+			),
+		).toThrow('at least one');
+	});
+});
 
 describe('component(): Flue value → <MyAgent/>', () => {
 	it('round-trips a defineAgent() definition to itself', () => {

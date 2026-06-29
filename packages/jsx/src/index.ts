@@ -1,10 +1,12 @@
-import { defineAgent, defineAgentProfile } from '@flue/runtime';
+import { defineAgent, defineAgentProfile, defineTool } from '@flue/runtime';
 import type {
 	AgentDefinition,
 	AgentProfile,
 	AgentRuntimeConfig,
 	Skill,
 	ToolDefinition,
+	ToolInputSchema,
+	ToolOutputSchema,
 } from '@flue/runtime';
 
 export { Fragment } from './jsx-runtime.ts';
@@ -16,8 +18,9 @@ export { Fragment } from './jsx-runtime.ts';
 const KIND = Symbol('flue.jsx.kind');
 // 'agentNode' = an <Agent> whose role (root definition vs nested subagent) is
 // decided by POSITION, not by markup. 'subagent' = the explicit (deprecated)
-// alias. 'agent' = a lifted real AgentDefinition (root-only).
-type Kind = 'agent' | 'agentNode' | 'subagent' | 'tool' | 'action' | 'skill';
+// alias. 'agent' = a lifted real AgentDefinition (root-only). 'engine' = a
+// swappable engine inside a <Tool capability> modelSlot.
+type Kind = 'agent' | 'agentNode' | 'subagent' | 'tool' | 'action' | 'skill' | 'engine';
 
 interface Tagged<T = unknown> {
 	readonly [KIND]: Kind;
@@ -79,6 +82,10 @@ function collectChildren(children: unknown): Buckets {
 					throw new Error(
 						'[flue-jsx] Cannot nest a lifted agent definition as a subagent. ' +
 							'Lift a profile (defineAgentProfile) instead, or author a nested <Agent name=…>.',
+					);
+				case 'engine':
+					throw new Error(
+						'[flue-jsx] <Engine> must be a child of <Tool capability="…">, not an agent.',
 					);
 			}
 			continue;
@@ -144,9 +151,115 @@ export function Subagent(props: SubagentProps): Tagged<AgentProfile> {
 	return tag('subagent', profile);
 }
 
-/** A model-callable tool. Pass an existing `defineTool()` value via `def`. */
-export function Tool(props: { def: ToolDefinition }): Tagged<ToolDefinition> {
-	return tag('tool', props.def);
+type ToolRun = (args: { input: never; signal: AbortSignal }) => unknown | Promise<unknown>;
+
+type ToolProps = {
+	/** Wrap an existing `defineTool()` value. */
+	def?: ToolDefinition;
+	/** …or author inline (compiles to `defineTool`, validation inherited). */
+	name?: string;
+	description?: string;
+	input?: ToolInputSchema;
+	output?: ToolOutputSchema;
+	run?: ToolRun;
+	/**
+	 * …or a **modelSlot**: a stable `capability` whose engine is swappable.
+	 * Provide `<Engine>` children; one `default`, plus an optional runtime
+	 * `select`. Compiles to a single `defineTool` that dispatches over the
+	 * engines — the swap mechanic, authorable in one element.
+	 */
+	capability?: string;
+	/** Human-readable IO contract label, e.g. "page-image -> md+json" (metadata). */
+	io?: string;
+	/** Runtime engine selector — called INSIDE the run thunk, once per call. */
+	select?: (input: never) => string | undefined;
+	children?: unknown;
+};
+
+/**
+ * A model-callable tool. Three forms:
+ * - wrap an existing tool: `<Tool def={…} />`
+ * - author inline: `<Tool name="…" description="…" run={…} />`
+ * - **modelSlot**: `<Tool capability="parse"><Engine name="gemini-flash" default run={…}/>…</Tool>`
+ * All compile to `defineTool`, so validation is inherited.
+ */
+export function Tool(props: ToolProps): Tagged<ToolDefinition> {
+	if (props.def) return tag('tool', props.def);
+	if (props.capability) return tag('tool', buildModelSlot(props));
+	const { def, capability, io, select, children, ...spec } = props;
+	return tag('tool', defineTool(spec as Parameters<typeof defineTool>[0]));
+}
+
+interface EngineSpec {
+	name: string;
+	default?: boolean;
+	run: ToolRun;
+}
+
+/** One swappable engine behind a `<Tool capability>` slot. */
+export function Engine(props: EngineSpec): Tagged<EngineSpec> {
+	return tag('engine', props);
+}
+
+function collectEngines(children: unknown): EngineSpec[] {
+	const engines: EngineSpec[] = [];
+	for (const child of flatten(children)) {
+		if (child == null || child === false || child === true || child === '') continue;
+		if (isTagged(child) && child[KIND] === 'engine') {
+			engines.push(child.value as EngineSpec);
+			continue;
+		}
+		throw new Error('[flue-jsx] <Tool capability> children must be <Engine name=… run=… />.');
+	}
+	return engines;
+}
+
+// modelSlot → ONE defineTool. The default is resolved at authoring time; the
+// optional `select` runs INSIDE the single run thunk (never a re-evaluated
+// declaration → no reconciler). The shared `output` schema enforces the IO
+// contract uniformly across whichever engine answered.
+function buildModelSlot(props: ToolProps): ToolDefinition {
+	const engines = collectEngines(props.children);
+	if (engines.length === 0) {
+		throw new Error('[flue-jsx] <Tool capability> needs at least one <Engine>.');
+	}
+	const seen = new Set<string>();
+	for (const e of engines) {
+		if (!e.name) throw new Error('[flue-jsx] <Engine> requires a name.');
+		if (seen.has(e.name)) {
+			throw new Error(
+				`[flue-jsx] <Tool capability="${props.capability}"> has a duplicate engine "${e.name}".`,
+			);
+		}
+		seen.add(e.name);
+	}
+	const defaults = engines.filter((e) => e.default);
+	if (defaults.length > 1) {
+		throw new Error(
+			`[flue-jsx] <Tool capability="${props.capability}"> has multiple default engines.`,
+		);
+	}
+	// engines.length > 0 was asserted above, so this is non-null.
+	const defaultEngine = (defaults[0] ?? engines[0])!.name;
+	const map = new Map(engines.map((e) => [e.name, e] as const));
+	const select = props.select;
+	return defineTool({
+		name: props.capability as string,
+		description:
+			props.description ?? `${props.capability} — engines: ${engines.map((e) => e.name).join(', ')}`,
+		input: props.input,
+		output: props.output,
+		run: ((args: { input: never; signal: AbortSignal }) => {
+			const name = select?.(args.input) ?? defaultEngine;
+			const engine = map.get(name);
+			if (!engine) {
+				throw new Error(
+					`[flue-jsx] <Tool capability="${props.capability}"> selected unknown engine "${name}".`,
+				);
+			}
+			return engine.run(args);
+		}) as Parameters<typeof defineTool>[0]['run'],
+	});
 }
 
 /** An Action. Pass an existing `defineAction()` value via `def`. */
