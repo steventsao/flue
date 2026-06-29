@@ -14,7 +14,10 @@ export { Fragment } from './jsx-runtime.ts';
 // by role. The wrapper is internal; toDefinition()/toProfile() unwrap it.
 
 const KIND = Symbol('flue.jsx.kind');
-type Kind = 'agent' | 'subagent' | 'tool' | 'action' | 'skill';
+// 'agentNode' = an <Agent> whose role (root definition vs nested subagent) is
+// decided by POSITION, not by markup. 'subagent' = the explicit (deprecated)
+// alias. 'agent' = a lifted real AgentDefinition (root-only).
+type Kind = 'agent' | 'agentNode' | 'subagent' | 'tool' | 'action' | 'skill';
 
 interface Tagged<T = unknown> {
 	readonly [KIND]: Kind;
@@ -58,8 +61,9 @@ function collectChildren(children: unknown): Buckets {
 		if (child == null || child === false || child === true || child === '') continue;
 		if (isTagged(child)) {
 			switch (child[KIND]) {
+				// A nested <Agent> (agentNode) IS a subagent — compose, don't mark up.
+				case 'agentNode':
 				case 'subagent':
-				case 'agent':
 					buckets.subagents.push(child.value as AgentProfile);
 					break;
 				case 'tool':
@@ -71,6 +75,11 @@ function collectChildren(children: unknown): Buckets {
 				case 'skill':
 					buckets.skills.push(child.value as Skill);
 					break;
+				case 'agent':
+					throw new Error(
+						'[flue-jsx] Cannot nest a lifted agent definition as a subagent. ' +
+							'Lift a profile (defineAgentProfile) instead, or author a nested <Agent name=…>.',
+					);
 			}
 			continue;
 		}
@@ -99,28 +108,36 @@ function build(rest: Record<string, unknown>, buckets: Buckets): Record<string, 
 
 // ─── Builder components ───────────────────────────────────────────────────
 
-type AgentProps = Omit<
-	AgentRuntimeConfig,
-	'skills' | 'tools' | 'actions' | 'subagents'
-> & {
+type AgentProps = Omit<AgentRuntimeConfig, 'skills' | 'tools' | 'actions' | 'subagents'> & {
+	/**
+	 * Required when nested (becomes the subagent's name). Rejected at the root —
+	 * a root agent definition has no name, so Flue throws the same
+	 * "unknown runtime config field name" it would for a hand-written config.
+	 */
+	name?: string;
 	children?: unknown;
 };
 
 /**
- * Root agent element. Compiles to the identical value `defineAgent(() => …)`
- * produces, so its default export is a drop-in Flue agent definition.
+ * An agent element. Its ROLE is decided by position, not markup:
+ * - at the root (`toDefinition(<Agent/>)`) it becomes an `AgentDefinition`;
+ * - nested inside another `<Agent>` it becomes a subagent profile.
+ * One primitive, composed by nesting — no `<Subagent>` needed.
  */
-export function Agent(props: AgentProps): AgentDefinition {
+export function Agent(props: AgentProps): Tagged<AgentRuntimeConfig> {
 	const { children, ...rest } = props;
 	const config = build(rest as Record<string, unknown>, collectChildren(children)) as AgentRuntimeConfig;
-	return defineAgent(() => config);
+	return tag('agentNode', config);
 }
 
 type SubagentProps = Omit<AgentProfile, 'skills' | 'tools' | 'actions' | 'subagents'> & {
 	children?: unknown;
 };
 
-/** A nested agent profile. Buckets into the parent's `subagents`. */
+/**
+ * @deprecated Explicit alias — just nest an `<Agent name=…>` instead; a nested
+ * `<Agent>` already buckets into the parent's `subagents`. Kept for clarity.
+ */
 export function Subagent(props: SubagentProps): Tagged<AgentProfile> {
 	const { children, ...rest } = props;
 	const profile = build(rest as Record<string, unknown>, collectChildren(children)) as AgentProfile;
@@ -188,6 +205,10 @@ export function toDefinition(node: unknown): AgentDefinition {
 	if (isTagged(node)) {
 		const t: Tagged = node;
 		if (t[KIND] === 'agent') return t.value as AgentDefinition;
+		if (t[KIND] === 'agentNode') {
+			const config = t.value as AgentRuntimeConfig;
+			return defineAgent(() => config);
+		}
 		if (t[KIND] === 'subagent') {
 			const profile = t.value as AgentProfile;
 			return defineAgent(() => ({ profile }));

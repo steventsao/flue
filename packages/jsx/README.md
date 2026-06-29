@@ -23,17 +23,20 @@ import { recropCitation } from '../tools/recrop.ts';
 
 export default toDefinition(
   <Agent model="anthropic/claude-sonnet-4-6" instructions="Coordinate document parsing.">
-    <Subagent name="partition" model="google/gemini-flash" instructions="Tokenize the page into regions." />
-    <Subagent name="parse"     model="google/gemini-flash" instructions="Transcribe literally — never fix typos." />
-    <Subagent name="extract"   model="anthropic/claude-sonnet-4-6" instructions="Null over guess. Cite every value." />
-    <Subagent name="verify"    instructions="Re-crop the cited bbox and refute.">
+    <Agent name="partition" model="google/gemini-flash" instructions="Tokenize the page into regions." />
+    <Agent name="parse"     model="google/gemini-flash" instructions="Transcribe literally — never fix typos." />
+    <Agent name="extract"   model="anthropic/claude-sonnet-4-6" instructions="Null over guess. Cite every value." />
+    <Agent name="verify"    instructions="Re-crop the cited bbox and refute.">
       <Tool def={recropCitation} />
-    </Subagent>
+    </Agent>
   </Agent>,
 );
 ```
 
-This is identical to the hand-written `defineAgent(() => ({ model, instructions, subagents: […], … }))`.
+**Role is decided by position, not markup:** a nested `<Agent name=…>` is automatically a
+subagent (recursively), so you compose one primitive. This is identical to the hand-written
+`defineAgent(() => ({ model, instructions, subagents: […], … }))`. (`<Subagent>` still exists as
+a deprecated explicit alias.)
 
 ## Lifting (Flue → JSX)
 
@@ -53,8 +56,9 @@ export default toDefinition(
 
 | Element / fn | Compiles to |
 | --- | --- |
-| `<Agent …>` | `AgentDefinition` (drop-in for `defineAgent`) |
-| `<Subagent name=… …>` | an `AgentProfile` in the parent's `subagents` |
+| `<Agent …>` (root) | `AgentDefinition` (drop-in for `defineAgent`) |
+| `<Agent name=… …>` (nested) | an `AgentProfile` in the parent's `subagents` — recursive |
+| `<Subagent name=… …>` | _deprecated_ — explicit alias for a nested `<Agent>` |
 | `<Tool def={…} />` | a `ToolDefinition` in `tools` |
 | `<Action def={…} />` | an action in `actions` |
 | `<Skill def={…} />` | a `Skill` in `skills` |

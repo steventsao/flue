@@ -25,6 +25,39 @@ describe('<Agent> ≡ defineAgent()', () => {
 		expect(await config(jsx)).toEqual(await config(ref));
 	});
 
+	it('treats a NESTED <Agent> as a subagent — compose, no <Subagent> markup', async () => {
+		const jsx = toDefinition(
+			<Agent model={M} instructions="Coordinate.">
+				<Agent name="parse" model="google/gemini-flash" instructions="Transcribe." />
+				<Agent name="verify" model={M} instructions="Refute." />
+			</Agent>,
+		);
+		const ref = defineAgent(() => ({
+			model: M,
+			instructions: 'Coordinate.',
+			subagents: [
+				{ name: 'parse', model: 'google/gemini-flash', instructions: 'Transcribe.' },
+				{ name: 'verify', model: M, instructions: 'Refute.' },
+			],
+		}));
+		expect(await config(jsx)).toEqual(await config(ref));
+	});
+
+	it('nests <Agent> recursively (subagent of a subagent)', async () => {
+		const jsx = toDefinition(
+			<Agent model={M}>
+				<Agent name="outer" model={M}>
+					<Agent name="inner" model="google/gemini-flash" />
+				</Agent>
+			</Agent>,
+		);
+		const ref = defineAgent(() => ({
+			model: M,
+			subagents: [{ name: 'outer', model: M, subagents: [{ name: 'inner', model: 'google/gemini-flash' }] }],
+		}));
+		expect(await config(jsx)).toEqual(await config(ref));
+	});
+
 	it('compiles <Subagent> children to the same subagents array', async () => {
 		const jsx = toDefinition(
 			<Agent model={M} instructions="Coordinate.">
