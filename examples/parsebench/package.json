@@ -9,7 +9,11 @@
 		"hono": "^4.7.0",
 		"valibot": "^1.0.0"
 	},
+	"scripts": {
+		"test": "vitest run"
+	},
 	"devDependencies": {
-		"@flue/cli": "workspace:*"
+		"@flue/cli": "workspace:*",
+		"vitest": "^4.1.6"
 	}
 }
