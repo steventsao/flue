@@ -1,0 +1,15 @@
+{
+	"name": "parsebench-example",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@flue/jsx": "workspace:*",
+		"@flue/runtime": "workspace:*",
+		"agents": "^0.14.2",
+		"hono": "^4.7.0",
+		"valibot": "^1.0.0"
+	},
+	"devDependencies": {
+		"@flue/cli": "workspace:*"
+	}
+}
