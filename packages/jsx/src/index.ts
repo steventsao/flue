@@ -8,6 +8,7 @@ import type {
 } from '@flue/runtime';
 
 export { Fragment } from './jsx-runtime.ts';
+export { type AgentContext, createAgentContext } from './context.ts';
 
 // ─── Tagged builder nodes ─────────────────────────────────────────────────
 // Builder components return a small wrapper so a parent can bucket each child
