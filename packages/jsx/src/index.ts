@@ -98,10 +98,29 @@ function collectChildren(children: unknown): Buckets {
 	return buckets;
 }
 
+// Surface a duplicate `name` at the composition site (mount/compile) rather than
+// deferring to Flue's async harness validation — the one coupling that survives
+// hierarchy-is-derived. Two composed components colliding on a name fail here.
+function assertUniqueNames(items: Array<{ name?: string }>, kind: string): void {
+	const seen = new Set<string>();
+	for (const item of items) {
+		const name = item?.name;
+		if (!name) continue;
+		if (seen.has(name)) {
+			throw new Error(`[flue-jsx] duplicate ${kind} name "${name}" in <Agent>.`);
+		}
+		seen.add(name);
+	}
+}
+
 // Drop undefined-valued props, then attach only the buckets that have entries —
 // so the produced object matches a hand-written defineAgent()/defineAgentProfile()
 // that omits empty arrays and unset fields.
 function build(rest: Record<string, unknown>, buckets: Buckets): Record<string, unknown> {
+	assertUniqueNames(buckets.subagents, 'subagent');
+	assertUniqueNames(buckets.tools, 'tool');
+	assertUniqueNames(buckets.actions as Array<{ name?: string }>, 'action');
+	assertUniqueNames(buckets.skills, 'skill');
 	const out: Record<string, unknown> = {};
 	for (const [key, v] of Object.entries(rest)) {
 		if (v !== undefined) out[key] = v;

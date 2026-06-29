@@ -193,6 +193,44 @@ describe('components, hierarchy derived at compile', () => {
 	});
 });
 
+// The one coupling left after hierarchy-is-derived: a subagent's `name`. If two
+// composed components collide on a name, surface it at the COMPOSITION site
+// (mount/compile), not deferred to the async harness.
+describe('compile-time uniqueness guardrails', () => {
+	it('rejects duplicate subagent names at the composition site', () => {
+		expect(() =>
+			toDefinition(
+				<Agent model={M}>
+					<Agent name="dup" model={M} />
+					<Agent name="dup" model={M} />
+				</Agent>,
+			),
+		).toThrow('duplicate subagent name "dup"');
+	});
+
+	it('catches a name collision between two composed components', () => {
+		expect(() =>
+			toDefinition(
+				<Agent model={M}>
+					<ResearchAgent />
+					<ResearchAgent />
+				</Agent>,
+			),
+		).toThrow('duplicate subagent name "research"');
+	});
+
+	it('rejects duplicate tool names at the composition site', () => {
+		expect(() =>
+			toDefinition(
+				<Agent model={M}>
+					<Tool name="t" description="a" run={async () => 1} />
+					<Tool name="t" description="b" run={async () => 2} />
+				</Agent>,
+			),
+		).toThrow('duplicate tool name "t"');
+	});
+});
+
 // Reusability: a quality tool defined in its own file (here, a module const) is
 // composed two equivalent ways — <Tool def={imported}/> and a component()-lifted
 // <Lookup/>. Same symmetric lift as agents. Encourage this over inline authoring.
