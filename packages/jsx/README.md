@@ -14,6 +14,47 @@ There is **no reconciler and no runtime**: `jsx()` eagerly invokes the builder,
 so a tree evaluates bottom-up straight into a plain Flue object. The component
 analogy holds at the *authoring + composition* layer; nothing here re-renders.
 
+## The core idea: components, not definitions — hierarchy is derived
+
+Flue's `defineAgent({ subagents: [...] })` bakes the hierarchy **into the
+definition**. This layer inverts that: write each agent and tool as a standalone
+**component that knows nothing about its parent**, and let the JSX tree **derive**
+the `subagents`/`tools` arrays at compile. The hierarchy lives at the *composition
+site*, never in any definition — exactly like React.
+
+```tsx
+// tools/lookup.tsx        — knows nothing about any agent
+export function LookupTool() {
+  return <Tool name="lookup" description="Look up a value." run={lookup} />;
+}
+// agents/research.tsx     — knows nothing about any orchestrator
+export function ResearchAgent() {
+  return <Agent name="research" model="google/gemini-flash" instructions="Find sources." />;
+}
+// agents/writer.tsx       — a host forwards children, like any component
+export function WriterAgent(props: { children?: unknown }) {
+  return <Agent name="writer" model="…" instructions="Draft.">{props.children}</Agent>;
+}
+
+// agents/orchestrator.tsx — the ONLY place the hierarchy exists; derived at compile
+export default toDefinition(
+  <Agent model="anthropic/claude-sonnet-4-6" instructions="Coordinate.">
+    <ResearchAgent />
+    <WriterAgent />
+    <LookupTool />
+  </Agent>,
+);
+```
+
+No `defineAgent` ever hand-writes `subagents`. Rearranging the tree — e.g. nesting
+`<WriterAgent><ResearchAgent/></WriterAgent>` — yields a different hierarchy from
+the **same** components. That's the whole point: composition is a property of the
+tree, not the definition.
+
+`component(value)` (below) is only for the inverse case — lifting a *pre-existing*
+`defineAgent`/`defineTool` **value** into a component. When you author fresh, just
+write the component.
+
 ## Authoring (JSX → Flue)
 
 ```tsx

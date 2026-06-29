@@ -142,6 +142,57 @@ describe('<Agent> ≡ defineAgent()', () => {
 
 // ── vice versa: lift an existing Flue value into <MyAgent/> ──
 
+// The core idea: write agents and tools as standalone COMPONENTS that know
+// nothing about their parents. The hierarchy (subagents/tools) is NOT declared in
+// any defineAgent — it's derived at compile from how the components are composed.
+function LookupTool() {
+	return <Tool name="lookup" description="Look up a value." run={async () => 'x'} />;
+}
+function ResearchAgent() {
+	return <Agent name="research" model="google/gemini-flash" instructions="Find sources." />;
+}
+// A component that wants to host children forwards them, exactly like React.
+function WriterAgent(props: { children?: unknown }) {
+	return (
+		<Agent name="writer" model="anthropic/claude-haiku-4-5" instructions="Draft.">
+			{props.children}
+		</Agent>
+	);
+}
+
+describe('components, hierarchy derived at compile', () => {
+	it('composes plain function components; subagents/tools derived from the tree', async () => {
+		const def = toDefinition(
+			<Agent model={M} instructions="Coordinate.">
+				<ResearchAgent />
+				<WriterAgent />
+				<LookupTool />
+			</Agent>,
+		);
+		const cfg = await config(def);
+		// Hierarchy derived — no defineAgent({subagents}) was ever hand-written.
+		expect(cfg.subagents).toEqual([
+			{ name: 'research', model: 'google/gemini-flash', instructions: 'Find sources.' },
+			{ name: 'writer', model: 'anthropic/claude-haiku-4-5', instructions: 'Draft.' },
+		]);
+		expect(cfg.tools?.map((t) => t.name)).toEqual(['lookup']);
+	});
+
+	it('reorders to a different hierarchy with the SAME components (composition, not definition)', async () => {
+		// WriterAgent now owns ResearchAgent as ITS subagent — same components, new tree.
+		const def = toDefinition(
+			<Agent model={M}>
+				<WriterAgent>
+					<ResearchAgent />
+				</WriterAgent>
+			</Agent>,
+		);
+		const cfg = await config(def);
+		expect(cfg.subagents?.[0]?.name).toBe('writer');
+		expect(cfg.subagents?.[0]?.subagents?.[0]?.name).toBe('research');
+	});
+});
+
 // Reusability: a quality tool defined in its own file (here, a module const) is
 // composed two equivalent ways — <Tool def={imported}/> and a component()-lifted
 // <Lookup/>. Same symmetric lift as agents. Encourage this over inline authoring.
