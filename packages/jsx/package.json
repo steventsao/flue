@@ -1,0 +1,33 @@
+{
+  "name": "@flue/jsx",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "JSX authoring layer for Flue agents. <Agent>/<Subagent> compile to defineAgent()/defineAgentProfile(); component() lifts an existing Flue value into <MyAgent/>.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:types": "tsc --noEmit"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./jsx-runtime": {
+      "types": "./src/jsx-runtime.ts",
+      "import": "./src/jsx-runtime.ts"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./src/jsx-dev-runtime.ts",
+      "import": "./src/jsx-dev-runtime.ts"
+    }
+  },
+  "dependencies": {
+    "@flue/runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
+  }
+}

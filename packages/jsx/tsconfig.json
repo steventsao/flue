@@ -1,0 +1,16 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"jsx": "react-jsx",
+		"jsxImportSource": "@flue/jsx",
+		"types": [],
+		"paths": {
+			"@flue/jsx/jsx-runtime": ["./src/jsx-runtime.ts"],
+			"@flue/jsx/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"],
+			"@flue/jsx": ["./src/index.ts"],
+			"@flue/runtime": ["../runtime/dist/index.d.mts"],
+			"@flue/runtime/internal": ["../runtime/dist/internal.d.mts"]
+		}
+	},
+	"include": ["src", "test", "example"]
+}
