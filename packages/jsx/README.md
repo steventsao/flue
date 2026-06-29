@@ -52,6 +52,43 @@ export default toDefinition(
 );
 ```
 
+## Reusability — define quality tools in a file, compose here
+
+Prefer defining tools (and agents) in their own files — properly typed, tested,
+reviewed — and composing the *imported* values. The JSX layer is for composition,
+not a place to hide one-off tool bodies.
+
+```tsx
+// tools/lookup.ts — the canonical, tested definition
+import { defineTool } from '@flue/runtime';
+import * as v from 'valibot';
+export const lookupTool = defineTool({
+  name: 'lookup_order',
+  description: 'Look up the status for one order id.',
+  input: v.object({ orderId: v.string() }),
+  run: async ({ input }) => statuses.get(input.orderId) ?? null,
+});
+```
+
+```tsx
+// agents/support.tsx — compose the imported tool, two equivalent ways
+import { lookupTool } from '../tools/lookup.ts';
+import { Agent, Tool, component, toDefinition } from '@flue/jsx';
+
+const Lookup = component(lookupTool);            // lift → a component (same as agents)
+
+export default toDefinition(
+  <Agent model="anthropic/claude-sonnet-4-6">
+    <Tool def={lookupTool} />                     {/* explicit */}
+    {/* …or <Lookup /> — the symmetric lift */}
+  </Agent>,
+);
+```
+
+Inline `<Tool name=… run={…}/>` exists for genuine one-offs; reach for an imported
+definition first. The same applies to modelSlot engines — each `<Engine run={…}/>`
+takes an ordinary function, so define the engine impls in files and compose them.
+
 ## API
 
 | Element / fn | Compiles to |

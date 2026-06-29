@@ -142,6 +142,45 @@ describe('<Agent> ≡ defineAgent()', () => {
 
 // ── vice versa: lift an existing Flue value into <MyAgent/> ──
 
+// Reusability: a quality tool defined in its own file (here, a module const) is
+// composed two equivalent ways — <Tool def={imported}/> and a component()-lifted
+// <Lookup/>. Same symmetric lift as agents. Encourage this over inline authoring.
+describe('reusable tools: define in a file, compose here', () => {
+	const lookupTool = defineTool({ name: 'lookup', description: 'Look up a value.', run: async () => 'x' });
+
+	it('lifts an imported tool with component() into <Lookup/>', async () => {
+		const Lookup = component(lookupTool);
+		const lifted = toDefinition(
+			<Agent model={M}>
+				<Lookup />
+			</Agent>,
+		);
+		const wrapped = toDefinition(
+			<Agent model={M}>
+				<Tool def={lookupTool} />
+			</Agent>,
+		);
+		expect(await config(lifted)).toEqual(await config(wrapped));
+	});
+
+	it('composes an imported tool as a modelSlot engine (run defined in a file)', async () => {
+		// engine `run`s are ordinary functions — define them in files, compose here.
+		const geminiParse = async () => 'G';
+		const qwenParse = async () => 'Q';
+		const def = toDefinition(
+			<Agent model={M}>
+				<Tool capability="parse">
+					<Engine name="gemini-flash" default run={geminiParse} />
+					<Engine name="qwen-vl" run={qwenParse} />
+				</Tool>
+			</Agent>,
+		);
+		// biome-ignore lint/suspicious/noExplicitAny: reach into the resolved tool
+		const tool = (await config(def)).tools![0] as any;
+		expect(await tool.run({ input: undefined, signal: new AbortController().signal })).toBe('G');
+	});
+});
+
 // The okra unlock: a stable capability with swappable engines, authored in one
 // element. Default resolved at authoring; runtime selection inside the run thunk.
 describe('<Tool capability> modelSlot — the swap mechanic', () => {
