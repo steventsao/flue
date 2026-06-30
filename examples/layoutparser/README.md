@@ -26,7 +26,7 @@ overlay tooling — ParseBench fills the divs, LayoutParser leaves them empty.
 
 ```bash
 LAYOUTPARSER_IMAGE=/path/to/page.png \
-  pnpm exec flue run detect-layout --env ~/dev/apikeys/.env
+  pnpm exec flue run detect-layout --env .env
 ```
 
 Returns `{ ok, regions, labels, head }` — the `data-bbox` count, the distinct
@@ -38,7 +38,7 @@ Delegated variant — the `triage` parent invokes `layoutparser` as a tool:
 
 ```bash
 LAYOUTPARSER_IMAGE=/path/to/page.png \
-  pnpm exec flue run triage-page --env ~/dev/apikeys/.env
+  pnpm exec flue run triage-page --env .env
 ```
 
 ## Test
