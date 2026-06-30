@@ -53,3 +53,4 @@ corporate-ca.pem
 
 # legacy code (kept locally for reference, not pushed)
 legacy/
+.gstack/

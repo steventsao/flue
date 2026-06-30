@@ -1,0 +1,21 @@
+{
+	"name": "layoutparser-example",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@flue/jsx": "workspace:*",
+		"@flue/runtime": "workspace:*",
+		"agents": "^0.14.2",
+		"hono": "^4.7.0",
+		"valibot": "^1.0.0"
+	},
+	"scripts": {
+		"test": "vitest run"
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "^4.20260602.1",
+		"@flue/cli": "workspace:*",
+		"vitest": "^4.1.6",
+		"wrangler": "^4.97.0"
+	}
+}

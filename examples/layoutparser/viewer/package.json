@@ -1,0 +1,23 @@
+{
+	"name": "layoutparser-viewer",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "vite build",
+		"deploy": "vite build && wrangler deploy"
+	},
+	"dependencies": {
+		"@flue/react": "workspace:*",
+		"@flue/sdk": "workspace:*",
+		"react": "^19.1.1",
+		"react-dom": "^19.2.6"
+	},
+	"devDependencies": {
+		"@types/react": "^19.1.8",
+		"@types/react-dom": "^19.1.6",
+		"@vitejs/plugin-react": "^5.0.0",
+		"typescript": "^6.0.3",
+		"vite": "^8.0.14",
+		"wrangler": "^4.97.0"
+	}
+}

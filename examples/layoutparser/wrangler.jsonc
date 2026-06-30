@@ -1,0 +1,21 @@
+{
+	// User-owned wrangler config. Flue reads this file, merges its generated
+	// bindings into an ignored Vite input config, and the Cloudflare Vite
+	// integration emits the deployable Worker. Agents are authored as `.tsx`
+	// (not discovered as standalone Durable Objects); the discovered `.ts`
+	// workflows own the DO classes and run the agents in-process.
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "flue-layoutparser",
+	"compatibility_date": "2026-06-01",
+	"compatibility_flags": ["nodejs_compat"],
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"FlueRegistry",
+				"FlueDetectLayoutWorkflow",
+				"FlueTriagePageWorkflow"
+			]
+		}
+	]
+}

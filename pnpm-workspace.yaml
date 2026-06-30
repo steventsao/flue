@@ -1,4 +1,4 @@
-packages: [packages/*, examples/*, apps/*, demo]
+packages: [packages/*, examples/*, examples/*/viewer, apps/*, demo]
 allowBuilds:
   '@google/genai': false
   '@mongodb-js/zstd': false
