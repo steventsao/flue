@@ -8,3 +8,10 @@
  */
 export { sqlite } from './agent-execution-store.ts';
 export { type LocalSandboxOptions, local } from './local.ts';
+export {
+	getLocalHarnessApiProvider,
+	LOCAL_HARNESS_API,
+	type LocalHarnessKind,
+	type LocalHarnessProviderOptions,
+	registerLocalHarnessProvider,
+} from './local-harness-provider.ts';

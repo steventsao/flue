@@ -20,6 +20,7 @@ export {
 	DelegationDepthExceededError,
 	FlueError,
 	InstrumentationAlreadyInstalledError,
+	LocalHarnessProviderError,
 	OperationFailedError,
 	ProductEventVersionError,
 	ProviderRegistrationError,

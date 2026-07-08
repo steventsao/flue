@@ -112,3 +112,35 @@ import {
 `CloudflareAIBindingRegistration` registers a provider backed by an `env.AI` Workers AI binding instead of an HTTP endpoint. Its optional `gateway` setting forwards AI Gateway options to each `env.AI.run(...)` call; set `gateway: false` to omit the gateway option.
 
 Cloudflare builds register the `cloudflare` provider ID automatically unless `app.ts` registers it first. Register that provider ID in `app.ts` when you intentionally want an authored binding registration to take precedence over the generated default. See [Cloudflare Workers AI](/docs/guide/models/#cloudflare-workers-ai-cloudflare-only) for setup and gateway examples.
+
+## Local harness providers (Node only)
+
+Import local harness helpers from `@flue/runtime/node`:
+
+```ts
+import { registerLocalHarnessProvider } from '@flue/runtime/node';
+```
+
+`registerLocalHarnessProvider(providerId, options)` registers a Node-only provider that shells out to an installed local agent CLI. Supported harness kinds are `pi`, `codex`, `claude`, and `opencode`. The helper uses each CLI's noninteractive mode and its existing local authentication, such as Codex login, Claude Code OAuth, or Pi's configured tokens.
+
+```ts title="src/app.ts"
+import { registerLocalHarnessProvider } from '@flue/runtime/node';
+
+registerLocalHarnessProvider('codex', { kind: 'codex' });
+registerLocalHarnessProvider('claude', { kind: 'claude' });
+registerLocalHarnessProvider('pi', { kind: 'pi' });
+```
+
+After registration, select the provider with normal model specifiers:
+
+```ts title="src/agents/local-assistant.ts"
+import { defineAgent } from '@flue/runtime';
+
+export default defineAgent(() => ({
+  model: 'codex/default',
+}));
+```
+
+Everything after the first slash is passed as the CLI model argument. Use `default` to let the CLI use its own configured default model, or use values such as `codex/gpt-5-codex`, `claude/sonnet`, or `pi/anthropic/claude-sonnet-4-6`.
+
+The first version adapts final text only. It does not translate the CLI's internal tool calls, streaming events, or session files into Flue tool-call events. By default, the helper asks each CLI for an ephemeral, best-effort tool-disabled run where the CLI supports that mode. Set `disableTools: false` or pass CLI-specific `args` when you intentionally want the local harness to use its own tools.

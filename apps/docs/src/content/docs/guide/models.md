@@ -152,6 +152,32 @@ A provider registration can also supply authentication, headers, and model metad
 
 Choose a new provider ID unless you intend to override a built-in connection path. For example, registering `cloudflare` yourself takes precedence over Flue's generated `cloudflare/...` binding default, which is how the customization below takes effect.
 
+### Local agent CLIs (Node only)
+
+On the Node target, Flue can route model turns through a local CLI you already authenticated, such as Pi, Codex, Claude Code, or opencode. This is useful for local development when you want a Flue agent to use the same OAuth-backed tool you use in the terminal instead of configuring provider API keys.
+
+Register the local harness in `src/app.ts`:
+
+```ts title="src/app.ts"
+import { registerLocalHarnessProvider } from '@flue/runtime/node';
+
+registerLocalHarnessProvider('codex', { kind: 'codex' });
+```
+
+Then select it like any other model provider:
+
+```ts title="src/agents/local-assistant.ts"
+import { defineAgent } from '@flue/runtime';
+
+export default defineAgent(() => ({
+  model: 'codex/default',
+}));
+```
+
+`default` lets the CLI choose its configured default model. A more specific model ID is forwarded to the CLI, for example `claude/sonnet`, `codex/gpt-5-codex`, or `pi/openai/gpt-5`.
+
+Local harness providers are final-text adapters. They preserve the CLI's own authentication, but they do not expose the CLI's internal streaming, tool calls, or session storage as Flue events. Use them for local development and experiments; use ordinary provider registrations for deployable server artifacts that must run without a user's local CLI state.
+
 ## Cloudflare Workers AI (Cloudflare only)
 
 For applications built with `--target cloudflare`, Flue provides the `cloudflare/...` provider ID for running model calls through a [Workers AI](https://developers.cloudflare.com/workers-ai/) binding. This path uses the binding attached to your Worker rather than URL-backed provider credentials.

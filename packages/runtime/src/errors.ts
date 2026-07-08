@@ -705,6 +705,43 @@ export class CloudflareAIBindingError extends FlueError {
 	}
 }
 
+export class LocalHarnessProviderError extends FlueError {
+	constructor({
+		providerId,
+		command,
+		exitCode,
+		signal,
+		stdout,
+		stderr,
+		cause,
+	}: {
+		providerId: string;
+		command: readonly string[];
+		exitCode?: number | null;
+		signal?: string | null;
+		stdout?: string;
+		stderr?: string;
+		cause?: unknown;
+	}) {
+		const commandLine = command.map((part) => JSON.stringify(part)).join(' ');
+		const stdoutDetail = stdout ? `\nstdout:\n${stdout}` : '';
+		const stderrDetail = stderr ? `\nstderr:\n${stderr}` : '';
+		super({
+			type: 'local_harness_provider_error',
+			message: `Local harness provider "${providerId}" failed.`,
+			details: 'The local CLI process did not complete successfully.',
+			dev:
+				`Command: ${commandLine}` +
+				(exitCode === undefined || exitCode === null ? '' : `\nExit code: ${exitCode}`) +
+				(signal ? `\nSignal: ${signal}` : '') +
+				stdoutDetail +
+				stderrDetail,
+			meta: { providerId, exitCode, signal },
+			cause,
+		});
+	}
+}
+
 export class DelegationDepthExceededError extends FlueError {
 	constructor({ maxDepth }: { maxDepth: number }) {
 		super({
