@@ -1,29 +1,39 @@
-export type LoginHarness = 'codex' | 'claude';
+import type {
+	AssistantMessage,
+	Context,
+	SimpleStreamOptions,
+	ThinkingBudgets,
+	ThinkingLevel,
+} from '@earendil-works/pi-ai/compat';
 
-export type LoginExecutorContent =
-	| { type: 'text'; text: string }
-	| { type: 'toolCall'; name: string; arguments: Record<string, unknown> };
-
-export interface LoginExecutorResult {
-	content: LoginExecutorContent[];
-	stopReason: 'stop' | 'toolUse';
+export interface LoginExecutorTurnOptions {
+	temperature?: number;
+	maxTokens?: number;
+	reasoning?: ThinkingLevel;
+	thinkingBudgets?: ThinkingBudgets;
+	transport?: 'sse' | 'websocket' | 'websocket-cached' | 'auto';
+	cacheRetention?: 'none' | 'short' | 'long';
+	sessionId?: string;
+	timeoutMs?: number;
+	websocketConnectTimeoutMs?: number;
+	maxRetries?: number;
+	maxRetryDelayMs?: number;
+	metadata?: Record<string, unknown>;
 }
 
 export interface LoginExecutorJob {
 	jobId: string;
 	fence: number;
 	workerId: string;
-	harness: LoginHarness;
 	model: string;
-	prompt: string;
-	outputSchema: Record<string, unknown>;
+	context: Context;
+	options: LoginExecutorTurnOptions;
 	createdAt: string;
 	leaseExpiresAt: string;
 }
 
 export interface LoginExecutorClaimRequest {
 	workerId: string;
-	harness: LoginHarness;
 	waitMs?: number;
 }
 
@@ -33,95 +43,98 @@ export interface LoginExecutorLeaseRequest {
 }
 
 export interface LoginExecutorCompleteRequest extends LoginExecutorLeaseRequest {
-	result: LoginExecutorResult;
+	result: AssistantMessage;
 }
 
 export interface LoginExecutorFailRequest extends LoginExecutorLeaseRequest {
 	error: string;
 }
 
-export const LOGIN_EXECUTOR_OUTPUT_SCHEMA = {
-	type: 'object',
-	additionalProperties: false,
-	properties: {
-		text: {
-			type: 'string',
-			description: 'Assistant text. Use an empty string when returning only tool calls.',
-		},
-		toolCalls: {
-			type: 'array',
-			items: {
-				type: 'object',
-				additionalProperties: false,
-				properties: {
-					name: { type: 'string' },
-					arguments: {
-						type: 'string',
-						description: 'A JSON object encoded as a string.',
-					},
-				},
-				required: ['name', 'arguments'],
-			},
-		},
-		stopReason: { type: 'string', enum: ['stop', 'toolUse'] },
-	},
-	required: ['text', 'toolCalls', 'stopReason'],
-} as const;
+/** Copy only JSON-safe, non-secret options onto the worker job. */
+export function serializeLoginTurnOptions(options?: SimpleStreamOptions): LoginExecutorTurnOptions {
+	if (!options) return {};
+	return pickDefined({
+		temperature: options.temperature,
+		maxTokens: options.maxTokens,
+		reasoning: options.reasoning,
+		thinkingBudgets: options.thinkingBudgets,
+		transport: options.transport,
+		cacheRetention: options.cacheRetention,
+		sessionId: options.sessionId,
+		timeoutMs: options.timeoutMs,
+		websocketConnectTimeoutMs: options.websocketConnectTimeoutMs,
+		maxRetries: options.maxRetries,
+		maxRetryDelayMs: options.maxRetryDelayMs,
+		metadata: options.metadata,
+	});
+}
 
-export function parseLoginExecutorResult(value: unknown): LoginExecutorResult {
-	if (!value || typeof value !== 'object' || Array.isArray(value)) {
-		throw new TypeError('Login executor result must be an object.');
+/** Remove implementation-only message fields before crossing the JSON wire. */
+export function serializeLoginContext(context: Context): Context {
+	return {
+		...(context.systemPrompt === undefined ? {} : { systemPrompt: context.systemPrompt }),
+		messages: context.messages.map((message) => {
+			if (message.role === 'toolResult') {
+				const { details: _details, ...wireMessage } = message;
+				return wireMessage;
+			}
+			if (message.role === 'assistant') {
+				const { diagnostics: _diagnostics, ...wireMessage } = message;
+				return wireMessage;
+			}
+			return message;
+		}),
+		...(context.tools === undefined ? {} : { tools: context.tools }),
+	};
+}
+
+/** Validate and narrow an untrusted worker completion. */
+export function parseLoginExecutorMessage(value: unknown): AssistantMessage {
+	if (!isRecord(value) || value.role !== 'assistant') {
+		throw new TypeError('Login executor result must be an assistant message.');
 	}
-	const candidate = value as Record<string, unknown>;
-	if (candidate.stopReason !== 'stop' && candidate.stopReason !== 'toolUse') {
-		throw new TypeError('Login executor result has an invalid stopReason.');
+	if (
+		typeof value.api !== 'string' ||
+		typeof value.provider !== 'string' ||
+		typeof value.model !== 'string' ||
+		typeof value.timestamp !== 'number' ||
+		!['stop', 'length', 'toolUse', 'error', 'aborted'].includes(String(value.stopReason)) ||
+		!Array.isArray(value.content) ||
+		!isUsage(value.usage)
+	) {
+		throw new TypeError('Login executor result contains invalid message metadata.');
 	}
-	const rawContent = Array.isArray(candidate.content)
-		? candidate.content
-		: flatWireContent(candidate.text, candidate.toolCalls);
-	const content = rawContent.map((part): LoginExecutorContent => {
-		if (!part || typeof part !== 'object' || Array.isArray(part)) {
-			throw new TypeError('Login executor content must contain objects.');
-		}
-		const block = part as Record<string, unknown>;
-		if (block.type === 'text' && typeof block.text === 'string') {
-			return { type: 'text', text: block.text };
-		}
-		if (block.type === 'toolCall' && typeof block.name === 'string') {
-			const arguments_ = parseToolArguments(block.arguments);
-			return {
-				type: 'toolCall',
-				name: block.name,
-				arguments: arguments_,
-			};
+	for (const part of value.content) {
+		if (!isRecord(part)) throw new TypeError('Login executor content must contain objects.');
+		if (part.type === 'text' && typeof part.text === 'string') continue;
+		if (part.type === 'thinking' && typeof part.thinking === 'string') continue;
+		if (
+			part.type === 'toolCall' &&
+			typeof part.id === 'string' &&
+			typeof part.name === 'string' &&
+			isRecord(part.arguments)
+		) {
+			continue;
 		}
 		throw new TypeError('Login executor result contains an invalid content block.');
-	});
-	const hasToolCall = content.some((part) => part.type === 'toolCall');
-	if (candidate.stopReason === 'toolUse' && !hasToolCall) {
-		throw new TypeError('A toolUse result must contain at least one tool call.');
 	}
-	return { content, stopReason: hasToolCall ? 'toolUse' : candidate.stopReason };
+	const { diagnostics: _diagnostics, ...message } = value;
+	return message as unknown as AssistantMessage;
 }
 
-function flatWireContent(text: unknown, toolCalls: unknown): unknown[] {
-	if (typeof text !== 'string' || !Array.isArray(toolCalls)) {
-		throw new TypeError('Login executor result must contain content or flat wire fields.');
-	}
-	return [
-		...(text.length > 0 ? [{ type: 'text', text }] : []),
-		...toolCalls.map((toolCall) =>
-			toolCall && typeof toolCall === 'object' && !Array.isArray(toolCall)
-				? { type: 'toolCall', ...(toolCall as Record<string, unknown>) }
-				: toolCall,
-		),
-	];
+function isUsage(value: unknown): boolean {
+	if (!isRecord(value) || !isRecord(value.cost)) return false;
+	return ['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens'].every(
+		(key) => typeof value[key] === 'number',
+	);
 }
 
-function parseToolArguments(value: unknown): Record<string, unknown> {
-	const decoded = typeof value === 'string' ? JSON.parse(value) : value;
-	if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
-		throw new TypeError('Login executor tool arguments must be a JSON object.');
-	}
-	return decoded as Record<string, unknown>;
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function pickDefined<T extends Record<string, unknown>>(value: T): Partial<T> {
+	return Object.fromEntries(
+		Object.entries(value).filter(([, entry]) => entry !== undefined),
+	) as Partial<T>;
 }

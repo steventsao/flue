@@ -1,12 +1,24 @@
 # `@flue/login-executor`
 
-Experimental Node-only model executor for running Flue agents through an existing local Codex or Claude login. The Flue server never receives the provider OAuth credential: it queues model turns, and a user-owned worker fulfills them by invoking the selected CLI.
+Experimental Node-only executor that runs every Flue model turn through Pi's native OpenAI Codex provider and a user-owned ChatGPT Plus/Pro OAuth credential. The Flue server never receives the OAuth credential: it queues native Pi contexts, and a local worker fulfills them one fenced lease at a time.
 
-The broker is globally single-threaded by default. It also installs a Flue execution interceptor that holds one process-wide slot across each agent operation, including model turns, nested agents, and Flue-owned tool calls. Other operations remain admitted and queued.
+The package is intentionally Codex-only. Pi already owns OAuth login, refresh locking, model metadata, the Codex Responses transport, tool calls, reasoning signatures, images, and usage. This package adds only the remote execution queue and Flue-wide serialization semantics.
+
+## Authenticate the local worker
+
+Pi's OAuth credential is separate from the Codex CLI login. If `~/.pi/agent/auth.json` already contains `openai-codex`, the worker uses it by default. Otherwise create a dedicated credential file:
+
+```sh
+mkdir -p ~/.flue/codex-worker
+cd ~/.flue/codex-worker
+npx @earendil-works/pi-ai login openai-codex
+```
+
+The login command writes `auth.json` in the current directory. Token refreshes are persisted atomically with mode `0600` and serialized by a credential-file lock.
 
 ## Server
 
-Create the broker in `src/app.ts`, mount its authenticated worker routes, then mount Flue:
+Mount the authenticated broker routes before mounting Flue:
 
 ```ts
 import { createLoginExecutorBroker } from '@flue/login-executor';
@@ -24,15 +36,14 @@ app.route('/', flue());
 export default app;
 ```
 
-An agent selects a login-backed provider through its ordinary model field. This means normal prompts, delegated tasks, tools, compaction, durable retries, and canonical conversation events continue to use Flue's existing runtime:
+Define a profile that cannot escape to a direct provider through a subagent or explicit compaction model:
 
 ```ts
-import { defineLoginBoundProfile } from '@flue/login-executor';
+import { defineCodexLoginProfile } from '@flue/login-executor';
 import { defineAgent } from '@flue/runtime';
 
 export default defineAgent(() => ({
-  profile: defineLoginBoundProfile({
-    harness: 'codex',
+  profile: defineCodexLoginProfile({
     model: 'gpt-5.4',
     instructions: 'Work carefully and keep responses concise.',
     durability: { timeoutMs: 21_600_000 },
@@ -40,89 +51,81 @@ export default defineAgent(() => ({
 }));
 ```
 
-Use `claude-login/sonnet` for Claude. Custom provider IDs and model metadata can be supplied through the broker's `providers` option.
-
-## One-shot local Codex CLI
-
-Build the package, then run this proof against the Codex login on the current machine:
-
-```console
-$ node packages/login-executor/dist/local-cli.mjs \
-    --model gpt-5.4 \
-    --json \
-    "Reply with exactly this text and nothing else: LOGIN_EXECUTOR_PROOF_OK"
-claimed 80cbba6b-b257-4da7-aa1e-2aea69023f8c
-completed 80cbba6b-b257-4da7-aa1e-2aea69023f8c
-{
-  "role": "assistant",
-  "content": [
-    {
-      "type": "text",
-      "text": "LOGIN_EXECUTOR_PROOF_OK"
-    }
-  ],
-  "api": "flue-login-executor",
-  "provider": "codex-login",
-  "model": "gpt-5.4",
-  "usage": {
-    "input": 105,
-    "output": 21,
-    "cacheRead": 0,
-    "cacheWrite": 0,
-    "totalTokens": 126,
-    "cost": {
-      "input": 0,
-      "output": 0,
-      "cacheRead": 0,
-      "cacheWrite": 0,
-      "total": 0
-    }
-  },
-  "stopReason": "stop",
-  "timestamp": 1783629005485
-}
-```
-
-The matching `claimed` and `completed` IDs show the fenced lease lifecycle. The `api` and `provider` fields prove the response returned through the login executor rather than a direct provider API. Job IDs, usage estimates, and timestamps vary between runs.
-
-The command runs one model turn through the custom Flue provider, authenticated broker, fenced worker lease, isolated Codex CLI process, and result validator. The broker stays in-process and opens no network listener. Once installed as a package, use the shorter `flue-login-local` binary. Omit the prompt to read it from stdin.
-
 ## Local worker
 
-The worker uses the selected CLI's existing local login. It does not read or upload the CLI's OAuth files.
+Run the worker on the machine that owns the Pi OAuth credential:
 
 ```sh
 export FLUE_LOGIN_EXECUTOR_TOKEN='replace-with-a-long-random-secret'
 
 flue-login-worker \
-  --url http://localhost:3583/_flue/login-executor \
-  --harness codex
+  --url https://server.example/_flue/login-executor \
+  --auth-file ~/.flue/codex-worker/auth.json
 ```
 
-Or run a Claude worker:
+`--auth-file` defaults to `FLUE_PI_AUTH_FILE`, then `~/.pi/agent/auth.json` when present, then `./auth.json`.
+
+Only one model lease is active globally, even if multiple workers poll. Every claim receives a monotonic fencing number; heartbeats extend its lease, expired jobs are requeued, and stale completions are rejected.
+
+## One-shot local proof
+
+The local command exercises the complete provider → broker → fenced lease → Pi OAuth worker path without opening a network listener:
 
 ```sh
-flue-login-worker \
-  --url http://localhost:3583/_flue/login-executor \
-  --harness claude
+pnpm --dir packages/login-executor build
+
+node packages/login-executor/dist/local-cli.mjs \
+  --model gpt-5.4 \
+  --json \
+  "Reply with exactly this text and nothing else: PI_CODEX_OAUTH_PROOF_OK"
+claimed 2aaf893d-37ea-4a23-8f55-699566627dfb
+completed 2aaf893d-37ea-4a23-8f55-699566627dfb
+{
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "PI_CODEX_OAUTH_PROOF_OK",
+      "textSignature": "{\"v\":1,\"id\":\"msg_...\",\"phase\":\"final_answer\"}"
+    }
+  ],
+  "api": "openai-codex-responses",
+  "provider": "openai-codex",
+  "model": "gpt-5.4",
+  "usage": {
+    "input": 33,
+    "output": 12,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "totalTokens": 45,
+    "cost": {
+      "input": 0.00008250000000000001,
+      "output": 0.00018,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "total": 0.00026250000000000004
+    }
+  },
+  "stopReason": "stop",
+  "responseId": "resp_..."
+}
 ```
 
-Only one worker lease is active at a time, even if multiple workers are polling. Every claim receives a monotonic fencing number; heartbeats extend the lease, and stale completions are rejected.
+The matching `claimed` and `completed` IDs prove the lease lifecycle. Native text signatures, response IDs, usage, `api: "openai-codex-responses"`, and `provider: "openai-codex"` prove the worker used Pi's OAuth provider rather than the Codex subprocess or a direct OpenAI API key. IDs, usage, and timestamps vary between runs.
 
 ## Execution model
 
 - Flue remains the canonical harness and executes profile tools itself.
-- Codex runs with an ephemeral session, read-only sandbox, and no approvals.
-- Claude runs without session persistence and with its built-in tools disabled.
-- Each CLI receives the complete Flue model context and a validated JSON wire contract. Codex also enforces that contract through its native output-schema option.
-- The CLI returns assistant text or structured Flue tool calls.
-- With no compatible logged-in worker, the model turn remains queued until the agent's durability timeout or cancellation.
+- The server sends native Pi `Context` values; the worker returns native Pi `AssistantMessage` values.
+- OAuth credentials, headers, environment values, callbacks, and abort signals never cross the worker route.
+- Pi preserves Codex tool-call IDs, thinking signatures, response IDs, images, stop reasons, and actual usage.
+- Agent operations are globally serialized process-wide, including nested agents and Flue-owned tool calls. Later operations remain admitted and queued.
+- With no worker, the model turn remains queued until cancellation or the agent's durability timeout.
 
 ## Current limits
 
-- Node only; the broker is process-local and intended for a continuously running personal server.
-- Text context only. Image turns fail before a job is admitted.
-- Input and output tokens are estimated from character counts for compaction; cost remains zero because subscription CLIs do not expose compatible per-turn accounting here.
-- Broker jobs are ephemeral. The outer Flue submission remains durable and may reconstruct the model turn after restart, so side-effecting behavior must stay in Flue tools rather than the CLI harness.
-- Do not configure a direct-provider `compaction.model` or subagent model if every turn must remain subscription-bound. Use the inherited `codex-login/*` or `claude-login/*` model.
-- The worker route is an administrative execution surface. Protect it with a strong token and an application-owned network/auth policy.
+- Node only; broker jobs are process-local and ephemeral. The outer Flue submission remains durable and can reconstruct a turn after server restart.
+- The broker buffers each Pi turn rather than relaying live token deltas.
+- A lease expiry can briefly duplicate subscription work if an unreachable worker ignores cancellation; fencing prevents its stale result from being accepted.
+- The native message wire is version-coupled to Pi, so the package pins `@earendil-works/pi-ai` exactly.
+- Protect the worker route with a strong token and an application-owned network policy.

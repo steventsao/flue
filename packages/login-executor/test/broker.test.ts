@@ -1,4 +1,4 @@
-import { completeSimple } from '@earendil-works/pi-ai/compat';
+import { type AssistantMessage, completeSimple } from '@earendil-works/pi-ai/compat';
 import { resolveModel } from '@flue/runtime/internal';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createLoginExecutorBroker } from '../src/broker.ts';
@@ -11,12 +11,8 @@ afterEach(async () => {
 });
 
 describe('createLoginExecutorBroker()', () => {
-	it('serializes model turns when one worker lease is active', async () => {
-		const broker = createLoginExecutorBroker({
-			token: 'secret',
-			providers: [{ providerId: 'codex-login', harness: 'codex' }],
-			leaseMs: 30_000,
-		});
+	it('serializes native Pi turns when one worker lease is active', async () => {
+		const broker = createLoginExecutorBroker({ token: 'secret', leaseMs: 30_000 });
 		const model = resolveModel('codex-login/gpt-test');
 		const firstResult = completeSimple(model, {
 			systemPrompt: 'Be concise.',
@@ -27,66 +23,32 @@ describe('createLoginExecutorBroker()', () => {
 			messages: [{ role: 'user', content: 'second', timestamp: Date.now() }],
 		});
 
-		const firstClaim = await broker.routes.request('/claim', {
-			method: 'POST',
-			headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
-			body: JSON.stringify({ workerId: 'worker-1', harness: 'codex', waitMs: 0 }),
-		});
-		const firstJob = (await firstClaim.json()) as LoginExecutorJob;
+		const firstClaim = await claim(broker, 'worker-1');
 		const blockedClaim = await broker.routes.request('/claim', {
 			method: 'POST',
-			headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
-			body: JSON.stringify({ workerId: 'worker-1', harness: 'codex', waitMs: 0 }),
+			headers: headers(),
+			body: JSON.stringify({ workerId: 'worker-1', waitMs: 0 }),
 		});
 
-		expect(firstClaim.status).toBe(200);
+		expect(firstClaim.response.status).toBe(200);
+		expect(firstClaim.job.context.messages).toMatchObject([{ role: 'user', content: 'first' }]);
 		expect(blockedClaim.status).toBe(204);
 		expect(broker.pending()).toBe(2);
 
-		const stale = await broker.routes.request(`/jobs/${firstJob.jobId}/complete`, {
-			method: 'POST',
-			headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
-			body: JSON.stringify({
-				workerId: 'worker-1',
-				fence: firstJob.fence + 1,
-				result: { content: [{ type: 'text', text: 'wrong' }], stopReason: 'stop' },
-			}),
-		});
+		const stale = await complete(broker, firstClaim.job, 'worker-1', assistant('wrong'), 1);
 		expect(stale.status).toBe(409);
 
-		const completed = await broker.routes.request(`/jobs/${firstJob.jobId}/complete`, {
-			method: 'POST',
-			headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
-			body: JSON.stringify({
-				workerId: 'worker-1',
-				fence: firstJob.fence,
-				result: { content: [{ type: 'text', text: 'first answer' }], stopReason: 'stop' },
-			}),
-		});
+		const completed = await complete(broker, firstClaim.job, 'worker-1', assistant('first answer'));
 		expect(completed.status).toBe(200);
 		await expect(firstResult).resolves.toMatchObject({
 			content: [{ type: 'text', text: 'first answer' }],
-			provider: 'codex-login',
+			provider: 'openai-codex',
+			usage: { input: 12, output: 3 },
 		});
 
-		const secondClaim = await broker.routes.request('/claim', {
-			method: 'POST',
-			headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
-			body: JSON.stringify({ workerId: 'worker-1', harness: 'codex', waitMs: 0 }),
-		});
-		const secondJob = (await secondClaim.json()) as LoginExecutorJob;
-		expect(secondClaim.status).toBe(200);
-		expect(secondJob.fence).toBeGreaterThan(firstJob.fence);
-
-		await broker.routes.request(`/jobs/${secondJob.jobId}/complete`, {
-			method: 'POST',
-			headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
-			body: JSON.stringify({
-				workerId: 'worker-1',
-				fence: secondJob.fence,
-				result: { content: [{ type: 'text', text: 'second answer' }], stopReason: 'stop' },
-			}),
-		});
+		const secondClaim = await claim(broker, 'worker-1');
+		expect(secondClaim.job.fence).toBeGreaterThan(firstClaim.job.fence);
+		await complete(broker, secondClaim.job, 'worker-1', assistant('second answer'));
 		await expect(secondResult).resolves.toMatchObject({
 			content: [{ type: 'text', text: 'second answer' }],
 		});
@@ -99,62 +61,79 @@ describe('createLoginExecutorBroker()', () => {
 		const response = await broker.routes.request('/claim', {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ workerId: 'worker-1', harness: 'codex', waitMs: 0 }),
+			body: JSON.stringify({ workerId: 'worker-1', waitMs: 0 }),
 		});
 
 		expect(response.status).toBe(401);
 	});
 
-	it('requeues a turn with a new fence when its worker lease expires', async () => {
+	it('requeues a native turn with a new fence when its worker lease expires', async () => {
 		let now = 1_000;
 		vi.spyOn(Date, 'now').mockImplementation(() => now);
-		const broker = createLoginExecutorBroker({
-			token: 'secret',
-			providers: [{ providerId: 'codex-login', harness: 'codex' }],
-			leaseMs: 10,
-		});
+		const broker = createLoginExecutorBroker({ token: 'secret', leaseMs: 10 });
 		const result = completeSimple(resolveModel('codex-login/gpt-test'), {
 			messages: [{ role: 'user', content: 'recover me', timestamp: now }],
 		});
-		const firstClaim = await broker.routes.request('/claim', {
-			method: 'POST',
-			headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
-			body: JSON.stringify({ workerId: 'worker-1', harness: 'codex', waitMs: 0 }),
-		});
-		const firstJob = (await firstClaim.json()) as LoginExecutorJob;
+		const firstClaim = await claim(broker, 'worker-1');
 
 		now += 11;
-		const replacementClaim = await broker.routes.request('/claim', {
-			method: 'POST',
-			headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
-			body: JSON.stringify({ workerId: 'worker-2', harness: 'codex', waitMs: 0 }),
-		});
-		const replacementJob = (await replacementClaim.json()) as LoginExecutorJob;
+		const replacement = await claim(broker, 'worker-2');
+		expect(replacement.job.jobId).toBe(firstClaim.job.jobId);
+		expect(replacement.job.fence).toBeGreaterThan(firstClaim.job.fence);
+		expect((await complete(broker, firstClaim.job, 'worker-1', assistant('stale'))).status).toBe(
+			409,
+		);
 
-		expect(replacementJob.jobId).toBe(firstJob.jobId);
-		expect(replacementJob.fence).toBeGreaterThan(firstJob.fence);
-		const stale = await broker.routes.request(`/jobs/${firstJob.jobId}/complete`, {
-			method: 'POST',
-			headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
-			body: JSON.stringify({
-				workerId: 'worker-1',
-				fence: firstJob.fence,
-				result: { content: [{ type: 'text', text: 'stale' }], stopReason: 'stop' },
-			}),
-		});
-		expect(stale.status).toBe(409);
-
-		await broker.routes.request(`/jobs/${replacementJob.jobId}/complete`, {
-			method: 'POST',
-			headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
-			body: JSON.stringify({
-				workerId: 'worker-2',
-				fence: replacementJob.fence,
-				result: { content: [{ type: 'text', text: 'recovered' }], stopReason: 'stop' },
-			}),
-		});
+		await complete(broker, replacement.job, 'worker-2', assistant('recovered'));
 		await expect(result).resolves.toMatchObject({
 			content: [{ type: 'text', text: 'recovered' }],
 		});
 	});
 });
+
+function assistant(text: string): AssistantMessage {
+	return {
+		role: 'assistant',
+		content: [{ type: 'text', text }],
+		api: 'openai-codex-responses',
+		provider: 'openai-codex',
+		model: 'gpt-test',
+		usage: {
+			input: 12,
+			output: 3,
+			cacheRead: 2,
+			cacheWrite: 0,
+			totalTokens: 17,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: 'stop',
+		timestamp: Date.now(),
+	};
+}
+
+function headers(): Record<string, string> {
+	return { authorization: 'Bearer secret', 'content-type': 'application/json' };
+}
+
+async function claim(broker: ReturnType<typeof createLoginExecutorBroker>, workerId: string) {
+	const response = await broker.routes.request('/claim', {
+		method: 'POST',
+		headers: headers(),
+		body: JSON.stringify({ workerId, waitMs: 0 }),
+	});
+	return { response, job: (await response.json()) as LoginExecutorJob };
+}
+
+function complete(
+	broker: ReturnType<typeof createLoginExecutorBroker>,
+	job: LoginExecutorJob,
+	workerId: string,
+	result: AssistantMessage,
+	fenceOffset = 0,
+) {
+	return broker.routes.request(`/jobs/${job.jobId}/complete`, {
+		method: 'POST',
+		headers: headers(),
+		body: JSON.stringify({ workerId, fence: job.fence + fenceOffset, result }),
+	});
+}

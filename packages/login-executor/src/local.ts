@@ -1,7 +1,7 @@
 import { type AssistantMessage, completeSimple, type Model } from '@earendil-works/pi-ai/compat';
 import { createLoginExecutorBroker } from './broker.ts';
-import { createCodexHarness } from './codex.ts';
-import type { LoginExecutorJob, LoginExecutorResult } from './protocol.ts';
+import { createPiCodexExecutor } from './pi-codex.ts';
+import type { LoginExecutorJob } from './protocol.ts';
 import { LOGIN_EXECUTOR_API } from './provider.ts';
 import { runLoginWorker } from './worker.ts';
 
@@ -9,8 +9,9 @@ export interface LocalCodexOptions {
 	prompt: string;
 	model?: string;
 	systemPrompt?: string;
+	authFile?: string;
 	signal?: AbortSignal;
-	execute?: (job: LoginExecutorJob, signal?: AbortSignal) => Promise<LoginExecutorResult>;
+	execute?: (job: LoginExecutorJob, signal?: AbortSignal) => Promise<AssistantMessage>;
 	onEvent?: (event: {
 		type: 'claimed' | 'completed' | 'failed';
 		jobId: string;
@@ -18,19 +19,12 @@ export interface LocalCodexOptions {
 	}) => void;
 }
 
-/**
- * Fulfill one model turn through the complete login-executor path without an
- * HTTP listener: provider, authenticated broker, worker lease, and Codex CLI.
- */
+/** Run one native Pi turn through the provider, broker, lease, and OAuth worker. */
 export async function runLocalCodex(options: LocalCodexOptions): Promise<AssistantMessage> {
 	if (options.prompt.trim().length === 0)
 		throw new TypeError('Local Codex prompt must not be empty.');
 	const token = crypto.randomUUID();
-	const broker = createLoginExecutorBroker({
-		token,
-		providers: [{ providerId: 'codex-login', harness: 'codex' }],
-		serializeAgentOperations: false,
-	});
+	const broker = createLoginExecutorBroker({ token, serializeAgentOperations: false });
 	const controller = new AbortController();
 	const forwardAbort = () => controller.abort(options.signal?.reason);
 	options.signal?.addEventListener('abort', forwardAbort, { once: true });
@@ -43,10 +37,10 @@ export async function runLocalCodex(options: LocalCodexOptions): Promise<Assista
 		provider: 'codex-login',
 		baseUrl: 'flue://login-executor',
 		reasoning: true,
-		input: ['text'],
+		input: ['text', 'image'],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 200_000,
-		maxTokens: 32_000,
+		contextWindow: 272_000,
+		maxTokens: 128_000,
 	};
 	const completion = completeSimple(
 		model,
@@ -59,12 +53,11 @@ export async function runLocalCodex(options: LocalCodexOptions): Promise<Assista
 	const worker = runLoginWorker({
 		url: 'http://login-executor.local',
 		token,
-		harness: 'codex',
 		workerId: 'local-codex',
 		waitMs: 0,
 		heartbeatMs: 5_000,
 		signal: controller.signal,
-		execute: options.execute ?? createCodexHarness(),
+		execute: options.execute ?? createPiCodexExecutor({ authFile: options.authFile }),
 		fetch: async (input, init) => broker.routes.fetch(new Request(input, init)),
 		onEvent: options.onEvent,
 	});

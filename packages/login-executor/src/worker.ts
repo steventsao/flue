@@ -1,10 +1,10 @@
-import type { LoginExecutorJob, LoginExecutorResult, LoginHarness } from './protocol.ts';
+import type { AssistantMessage } from '@earendil-works/pi-ai/compat';
+import type { LoginExecutorJob } from './protocol.ts';
 
 export interface LoginWorkerOptions {
 	url: string;
 	token: string;
-	harness: LoginHarness;
-	execute(job: LoginExecutorJob, signal?: AbortSignal): Promise<LoginExecutorResult>;
+	execute(job: LoginExecutorJob, signal?: AbortSignal): Promise<AssistantMessage>;
 	workerId?: string;
 	waitMs?: number;
 	heartbeatMs?: number;
@@ -34,7 +34,6 @@ export async function runLoginWorker(options: LoginWorkerOptions): Promise<void>
 				headers,
 				body: JSON.stringify({
 					workerId,
-					harness: options.harness,
 					waitMs: options.waitMs ?? 20_000,
 				}),
 				signal: options.signal,

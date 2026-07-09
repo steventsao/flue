@@ -6,6 +6,7 @@ const { values, positionals } = parseArgs({
 	options: {
 		model: { type: 'string', short: 'm', default: 'gpt-5.4' },
 		system: { type: 'string', short: 's' },
+		'auth-file': { type: 'string' },
 		json: { type: 'boolean' },
 		help: { type: 'boolean', short: 'h' },
 	},
@@ -16,12 +17,13 @@ const { values, positionals } = parseArgs({
 if (values.help) {
 	console.log(`Usage: flue-login-local [options] [prompt]
 
-Run one model turn through the local login-executor broker and the existing
-Codex CLI login. Reads the prompt from stdin when no positional prompt is given.
+Run one model turn through the local login-executor broker and Pi's native
+OpenAI Codex OAuth provider. Reads stdin when no positional prompt is given.
 
 Options:
   -m, --model <model>    Codex model (default: gpt-5.4)
   -s, --system <text>    Optional system prompt
+      --auth-file <path> Pi auth.json credential file
       --json             Print the complete assistant message as JSON
   -h, --help             Show this help`);
 	process.exit(0);
@@ -41,6 +43,7 @@ const message = await runLocalCodex({
 	prompt,
 	model: values.model,
 	systemPrompt: values.system,
+	authFile: values['auth-file'],
 	signal: controller.signal,
 	onEvent(event) {
 		if (event.type === 'claimed') console.error(`claimed ${event.jobId}`);

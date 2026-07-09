@@ -20,7 +20,7 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
-		"@earendil-works/pi-ai": "^0.80.2",
+		"@earendil-works/pi-ai": "0.80.2",
 		"@flue/runtime": "workspace:*",
 		"hono": "^4.8.3"
 	},

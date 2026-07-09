@@ -1,34 +1,33 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { createClaudeHarness } from './claude.ts';
-import { createCodexHarness } from './codex.ts';
-import type { LoginHarness } from './protocol.ts';
+import { createPiCodexExecutor } from './pi-codex.ts';
 import { runLoginWorker } from './worker.ts';
 
 const { values } = parseArgs({
 	options: {
 		url: { type: 'string' },
 		token: { type: 'string' },
-		harness: { type: 'string' },
-		model: { type: 'string' },
+		'auth-file': { type: 'string' },
 		help: { type: 'boolean', short: 'h' },
 	},
 	strict: true,
 });
 
 if (values.help) {
-	console.log(`Usage: flue-login-worker --url <broker-url> --harness <codex|claude> [--token <token>]
+	console.log(`Usage: flue-login-worker --url <broker-url> [--token <token>] [--auth-file <path>]
 
-The token defaults to FLUE_LOGIN_EXECUTOR_TOKEN. The worker uses the selected
-CLI's existing local login and processes one model turn at a time.`);
+The token defaults to FLUE_LOGIN_EXECUTOR_TOKEN. The auth file defaults to
+FLUE_PI_AUTH_FILE, ~/.pi/agent/auth.json when present, then ./auth.json.
+
+Create the OAuth credential with:
+  npx @earendil-works/pi-ai login openai-codex`);
 	process.exit(0);
 }
 
 const url = values.url;
 const token = values.token ?? process.env.FLUE_LOGIN_EXECUTOR_TOKEN;
-const harness = values.harness as LoginHarness | undefined;
-if (!url || !token || (harness !== 'codex' && harness !== 'claude')) {
-	console.error('Missing --url, token, or valid --harness. Run with --help for usage.');
+if (!url || !token) {
+	console.error('Missing --url or token. Run with --help for usage.');
 	process.exit(1);
 }
 
@@ -36,13 +35,10 @@ const controller = new AbortController();
 process.once('SIGINT', () => controller.abort());
 process.once('SIGTERM', () => controller.abort());
 
-const execute = harness === 'codex' ? createCodexHarness() : createClaudeHarness();
 await runLoginWorker({
 	url,
 	token,
-	harness,
-	execute: async (job, signal) =>
-		execute(values.model ? { ...job, model: values.model } : job, signal),
+	execute: createPiCodexExecutor({ authFile: values['auth-file'] }),
 	signal: controller.signal,
 	onEvent(event) {
 		if (event.type === 'claimed') console.error(`claimed ${event.jobId}`);

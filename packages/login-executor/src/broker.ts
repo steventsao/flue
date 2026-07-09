@@ -1,15 +1,12 @@
 import { registerApiProvider, registerProvider } from '@flue/runtime';
 import { Hono } from 'hono';
 import {
-	LOGIN_EXECUTOR_OUTPUT_SCHEMA,
 	type LoginExecutorClaimRequest,
 	type LoginExecutorCompleteRequest,
 	type LoginExecutorFailRequest,
 	type LoginExecutorJob,
 	type LoginExecutorLeaseRequest,
-	type LoginExecutorResult,
-	type LoginHarness,
-	parseLoginExecutorResult,
+	parseLoginExecutorMessage,
 } from './protocol.ts';
 import {
 	createLoginApiProvider,
@@ -19,47 +16,35 @@ import {
 } from './provider.ts';
 import { installGlobalAgentSerialization } from './serial.ts';
 
-export interface LoginProviderConfig {
-	providerId: string;
-	harness: LoginHarness;
-	contextWindow?: number;
-	maxTokens?: number;
-}
-
 export interface LoginExecutorBroker {
 	/** Mount under an application-owned path, for example `/_flue/login-executor`. */
 	routes: Hono;
-	/** Number of model turns waiting for a compatible logged-in worker. */
+	/** Number of native Pi model turns waiting for the logged-in worker. */
 	pending(): number;
 }
 
-interface PendingTurn {
+interface PendingTurn extends LoginTurnRequest {
 	jobId: string;
-	harness: LoginHarness;
-	model: string;
-	prompt: string;
-	toolNames: string[];
 	createdAt: number;
 	status: 'queued' | 'leased';
 	fence: number;
 	workerId?: string;
 	leaseExpiresAt?: number;
-	resolve(value: { jobId: string; result: LoginExecutorResult }): void;
+	resolve(value: Awaited<ReturnType<LoginTurnQueue['enqueue']>>): void;
 	reject(error: unknown): void;
 	detachAbort?: () => void;
 }
 
 /**
- * Create an authenticated, globally single-threaded model-turn broker.
- *
- * The broker holds no provider OAuth credentials. A local worker claims one
- * turn at a time and fulfills it through its existing Codex or Claude login.
+ * Create an authenticated, globally single-threaded native Pi turn broker.
+ * OAuth credentials remain exclusively in the local worker's credential file.
  */
 export function createLoginExecutorBroker(options: {
 	token: string;
-	providers?: LoginProviderConfig[];
 	leaseMs?: number;
-	/** Hold one process-wide slot across each agent operation, including its Flue tool calls. */
+	contextWindow?: number;
+	maxTokens?: number;
+	/** Hold one process-wide slot across each agent operation and its Flue tool calls. */
 	serializeAgentOperations?: boolean;
 }): LoginExecutorBroker {
 	if (options.token.trim().length === 0)
@@ -68,29 +53,19 @@ export function createLoginExecutorBroker(options: {
 	if (!Number.isSafeInteger(leaseMs) || leaseMs <= 0) {
 		throw new TypeError('Login executor leaseMs must be a positive integer.');
 	}
-	const providers = options.providers ?? [
-		{ providerId: 'codex-login', harness: 'codex' as const },
-		{ providerId: 'claude-login', harness: 'claude' as const },
-	];
 	if (options.serializeAgentOperations ?? true) installGlobalAgentSerialization();
-	const providerHarnesses = new Map(
-		providers.map((provider) => [provider.providerId, provider.harness]),
-	);
 	const turns: PendingTurn[] = [];
 	const waiters = new Set<() => void>();
 	let active: PendingTurn | undefined;
 	let nextFence = 1;
 
 	const queue: LoginTurnQueue = {
-		enqueue(request: LoginTurnRequest) {
+		enqueue(request) {
 			const jobId = crypto.randomUUID();
 			return new Promise((resolve, reject) => {
 				const turn: PendingTurn = {
+					...request,
 					jobId,
-					harness: request.harness,
-					model: request.model,
-					prompt: request.prompt,
-					toolNames: request.toolNames,
 					createdAt: Date.now(),
 					status: 'queued',
 					fence: 0,
@@ -114,16 +89,15 @@ export function createLoginExecutorBroker(options: {
 		},
 	};
 
-	const apiProvider = createLoginApiProvider({ queue, providers: providerHarnesses });
-	registerApiProvider(apiProvider as Parameters<typeof registerApiProvider>[0]);
-	for (const provider of providers) {
-		registerProvider(provider.providerId, {
-			api: LOGIN_EXECUTOR_API,
-			baseUrl: 'flue://login-executor',
-			contextWindow: provider.contextWindow ?? 200_000,
-			maxTokens: provider.maxTokens ?? 32_000,
-		});
-	}
+	registerApiProvider(
+		createLoginApiProvider({ queue }) as Parameters<typeof registerApiProvider>[0],
+	);
+	registerProvider('codex-login', {
+		api: LOGIN_EXECUTOR_API,
+		baseUrl: 'flue://login-executor',
+		contextWindow: options.contextWindow ?? 272_000,
+		maxTokens: options.maxTokens ?? 128_000,
+	});
 
 	function notifyWaiters(): void {
 		for (const waiter of waiters) waiter();
@@ -152,9 +126,7 @@ export function createLoginExecutorBroker(options: {
 	function claim(request: LoginExecutorClaimRequest): LoginExecutorJob | undefined {
 		reapExpiredLease();
 		if (active) return undefined;
-		const turn = turns.find(
-			(candidate) => candidate.status === 'queued' && candidate.harness === request.harness,
-		);
+		const turn = turns.find((candidate) => candidate.status === 'queued');
 		if (!turn) return undefined;
 		turn.status = 'leased';
 		turn.fence = nextFence++;
@@ -169,10 +141,9 @@ export function createLoginExecutorBroker(options: {
 			jobId: turn.jobId,
 			fence: turn.fence,
 			workerId: turn.workerId ?? '',
-			harness: turn.harness,
 			model: turn.model,
-			prompt: turn.prompt,
-			outputSchema: LOGIN_EXECUTOR_OUTPUT_SCHEMA,
+			context: turn.context,
+			options: turn.options,
 			createdAt: new Date(turn.createdAt).toISOString(),
 			leaseExpiresAt: new Date(turn.leaseExpiresAt ?? 0).toISOString(),
 		};
@@ -223,11 +194,7 @@ export function createLoginExecutorBroker(options: {
 	});
 	routes.post('/claim', async (c) => {
 		const request = (await c.req.json()) as LoginExecutorClaimRequest;
-		if (
-			typeof request.workerId !== 'string' ||
-			request.workerId.length === 0 ||
-			(request.harness !== 'codex' && request.harness !== 'claude')
-		) {
+		if (typeof request.workerId !== 'string' || request.workerId.length === 0) {
 			return c.json({ error: 'invalid claim' }, 400);
 		}
 		const waitMs = Math.min(Math.max(request.waitMs ?? 20_000, 0), 25_000);
@@ -250,9 +217,10 @@ export function createLoginExecutorBroker(options: {
 		const turn = ownedTurn(c.req.param('jobId'), request);
 		if (!turn) return c.json({ error: 'stale lease' }, 409);
 		try {
-			const result = parseLoginExecutorResult(request.result);
+			const result = parseLoginExecutorMessage(request.result);
+			const toolNames = new Set(turn.context.tools?.map((tool) => tool.name) ?? []);
 			for (const part of result.content) {
-				if (part.type === 'toolCall' && !turn.toolNames.includes(part.name)) {
+				if (part.type === 'toolCall' && !toolNames.has(part.name)) {
 					return c.json({ error: `unknown tool: ${part.name}` }, 400);
 				}
 			}

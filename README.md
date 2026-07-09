@@ -73,4 +73,4 @@ Build agents that can safely take action, maintain continuity, and connect to th
 | [`@flue/sdk`](packages/sdk)                       | Client SDK for consuming deployed agents and workflows |
 | [`@flue/opentelemetry`](packages/opentelemetry)   | OpenTelemetry tracing adapter                          |
 | [`@flue/postgres`](packages/postgres)             | Postgres persistence adapter                           |
-| [`@flue/login-executor`](packages/login-executor) | Experimental Codex/Claude login-bound model executor   |
+| [`@flue/login-executor`](packages/login-executor) | Remote Pi Codex OAuth model executor                   |
