@@ -44,13 +44,48 @@ Use `claude-login/sonnet` for Claude. Custom provider IDs and model metadata can
 
 ## One-shot local Codex CLI
 
-Use the local command to prove the complete path against the Codex login on the current machine:
+Build the package, then run this proof against the Codex login on the current machine:
 
-```sh
-flue-login-local --model gpt-5.4 "Reply with the exact text: login executor works"
+```console
+$ node packages/login-executor/dist/local-cli.mjs \
+    --model gpt-5.4 \
+    --json \
+    "Reply with exactly this text and nothing else: LOGIN_EXECUTOR_PROOF_OK"
+claimed 80cbba6b-b257-4da7-aa1e-2aea69023f8c
+completed 80cbba6b-b257-4da7-aa1e-2aea69023f8c
+{
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "LOGIN_EXECUTOR_PROOF_OK"
+    }
+  ],
+  "api": "flue-login-executor",
+  "provider": "codex-login",
+  "model": "gpt-5.4",
+  "usage": {
+    "input": 105,
+    "output": 21,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "totalTokens": 126,
+    "cost": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "total": 0
+    }
+  },
+  "stopReason": "stop",
+  "timestamp": 1783629005485
+}
 ```
 
-The command runs one model turn through the custom Flue provider, authenticated broker, fenced worker lease, isolated Codex CLI process, and result validator. The broker stays in-process and opens no network listener. Pass `--json` to inspect the complete assistant message, or omit the prompt to read it from stdin.
+The matching `claimed` and `completed` IDs show the fenced lease lifecycle. The `api` and `provider` fields prove the response returned through the login executor rather than a direct provider API. Job IDs, usage estimates, and timestamps vary between runs.
+
+The command runs one model turn through the custom Flue provider, authenticated broker, fenced worker lease, isolated Codex CLI process, and result validator. The broker stays in-process and opens no network listener. Once installed as a package, use the shorter `flue-login-local` binary. Omit the prompt to read it from stdin.
 
 ## Local worker
 
