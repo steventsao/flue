@@ -66,10 +66,11 @@ Build agents that can safely take action, maintain continuity, and connect to th
 
 ## Packages
 
-| Package                                         | Description                                            |
-| ----------------------------------------------- | ------------------------------------------------------ |
-| [`@flue/runtime`](packages/runtime)             | Runtime: harness, sessions, tools, sandbox             |
-| [`@flue/cli`](packages/cli)                     | CLI and build/dev tooling (`flue` binary)              |
-| [`@flue/sdk`](packages/sdk)                     | Client SDK for consuming deployed agents and workflows |
-| [`@flue/opentelemetry`](packages/opentelemetry) | OpenTelemetry tracing adapter                          |
-| [`@flue/postgres`](packages/postgres)           | Postgres persistence adapter                           |
+| Package                                           | Description                                            |
+| ------------------------------------------------- | ------------------------------------------------------ |
+| [`@flue/runtime`](packages/runtime)               | Runtime: harness, sessions, tools, sandbox             |
+| [`@flue/cli`](packages/cli)                       | CLI and build/dev tooling (`flue` binary)              |
+| [`@flue/sdk`](packages/sdk)                       | Client SDK for consuming deployed agents and workflows |
+| [`@flue/opentelemetry`](packages/opentelemetry)   | OpenTelemetry tracing adapter                          |
+| [`@flue/postgres`](packages/postgres)             | Postgres persistence adapter                           |
+| [`@flue/login-executor`](packages/login-executor) | Experimental Codex/Claude login-bound model executor   |
