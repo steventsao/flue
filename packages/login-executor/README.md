@@ -14,7 +14,7 @@ cd ~/.flue/codex-worker
 npx @earendil-works/pi-ai login openai-codex
 ```
 
-The login command writes `auth.json` in the current directory. Token refreshes are persisted atomically with mode `0600` and serialized by a credential-file lock.
+The login command writes `auth.json` in the current directory. Token refreshes are serialized and persisted atomically with mode `0600`. Give each worker its own credential file.
 
 ## Server
 
@@ -95,16 +95,7 @@ completed 2aaf893d-37ea-4a23-8f55-699566627dfb
   "usage": {
     "input": 33,
     "output": 12,
-    "cacheRead": 0,
-    "cacheWrite": 0,
-    "totalTokens": 45,
-    "cost": {
-      "input": 0.00008250000000000001,
-      "output": 0.00018,
-      "cacheRead": 0,
-      "cacheWrite": 0,
-      "total": 0.00026250000000000004
-    }
+    "totalTokens": 45
   },
   "stopReason": "stop",
   "responseId": "resp_..."
