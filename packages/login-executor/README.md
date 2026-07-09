@@ -42,6 +42,16 @@ export default defineAgent(() => ({
 
 Use `claude-login/sonnet` for Claude. Custom provider IDs and model metadata can be supplied through the broker's `providers` option.
 
+## One-shot local Codex CLI
+
+Use the local command to prove the complete path against the Codex login on the current machine:
+
+```sh
+flue-login-local --model gpt-5.4 "Reply with the exact text: login executor works"
+```
+
+The command runs one model turn through the custom Flue provider, authenticated broker, fenced worker lease, isolated Codex CLI process, and result validator. The broker stays in-process and opens no network listener. Pass `--json` to inspect the complete assistant message, or omit the prompt to read it from stdin.
+
 ## Local worker
 
 The worker uses the selected CLI's existing local login. It does not read or upload the CLI's OAuth files.
