@@ -5,6 +5,7 @@ export default defineConfig({
 		index: 'src/index.ts',
 		cli: 'src/cli.ts',
 		'local-cli': 'src/local-cli.ts',
+		'workflow-proof-cli': 'src/workflow-proof-cli.ts',
 	},
 	format: ['esm'],
 	dts: true,

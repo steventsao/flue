@@ -6,7 +6,8 @@
 	"license": "Apache-2.0",
 	"bin": {
 		"flue-login-worker": "dist/cli.mjs",
-		"flue-login-local": "dist/local-cli.mjs"
+		"flue-login-local": "dist/local-cli.mjs",
+		"flue-login-workflow-proof": "dist/workflow-proof-cli.mjs"
 	},
 	"exports": {
 		".": {

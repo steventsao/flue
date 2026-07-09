@@ -104,6 +104,32 @@ completed 2aaf893d-37ea-4a23-8f55-699566627dfb
 
 The matching `claimed` and `completed` IDs prove the lease lifecycle. Native text signatures, response IDs, usage, `api: "openai-codex-responses"`, and `provider: "openai-codex"` prove the worker used Pi's OAuth provider rather than the Codex subprocess or a direct OpenAI API key. IDs, usage, and timestamps vary between runs.
 
+## Workflow continuation proof
+
+Run a real Flue workflow whose only model operation is one Codex-login agent step. The workflow records a deterministic step before the model call, waits for the worker lease, then records another step and reaches the persisted `completed` state:
+
+```sh
+pnpm --dir packages/login-executor build
+
+env -u OPENAI_API_KEY node packages/login-executor/dist/workflow-proof-cli.mjs \
+  --auth-file ~/.pi/agent/auth.json \
+  --model gpt-5.4-mini \
+  "Reply with exactly this text and nothing else: LOGIN_WORKFLOW_STEP_OK"
+```
+
+The stderr sequence shows where the workflow pauses and resumes:
+
+```text
+step workflow_started
+step login_agent_started
+claimed <job-id>
+completed <job-id>
+step login_agent_completed
+step workflow_completed
+```
+
+The JSON result must contain `"status": "completed"`, `"loginText": "LOGIN_WORKFLOW_STEP_OK"`, `"provider": "codex-login"`, and all four steps in that order. Unsetting `OPENAI_API_KEY` makes the live proof fail rather than silently falling back to direct API billing.
+
 ## Execution model
 
 - Flue remains the canonical harness and executes profile tools itself.
