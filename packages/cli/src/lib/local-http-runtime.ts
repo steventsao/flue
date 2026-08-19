@@ -12,7 +12,7 @@ export interface LocalHttpRuntimeOutput {
 export interface StartLocalHttpRuntimeOptions {
 	root: string;
 	sourceRoot: string;
-	target: 'node' | 'cloudflare';
+	target: 'node' | 'cloudflare' | 'celld';
 	output?: string;
 	port?: number;
 	configFile?: string;
@@ -24,7 +24,7 @@ export interface StartLocalHttpRuntimeOptions {
 }
 
 export interface LocalHttpRuntime {
-	readonly target: 'node' | 'cloudflare';
+	readonly target: 'node' | 'cloudflare' | 'celld';
 	readonly port: number;
 	readonly url: string;
 	reload(): Promise<void>;
@@ -62,6 +62,15 @@ export async function startLocalHttpRuntime(
 		const runtime = await startInMemoryNodeRuntime({ ...options, root, sourceRoot, port });
 		options.onBuildComplete?.();
 		return { target: 'node', ...runtime };
+	}
+	if (options.target === 'celld') {
+		// There is no local celld runtime: a celld node needs a real
+		// S3-compatible or GCS bucket to coordinate through.
+		throw new Error(
+			'[flue] Cannot start a local runtime for the celld target. ' +
+				'Deploy the build to a celld fleet (`flue build --target celld`, then `celld deploy`) ' +
+				'and pass --server <url> to run against it.',
+		);
 	}
 	const output = path.resolve(options.output ?? path.join(root, 'dist'));
 	const buildOptions: BuildOptions = {

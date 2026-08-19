@@ -39,7 +39,7 @@ export interface DevOptions {
 	 * See {@link BuildOptions.output} for details.
 	 */
 	output?: string;
-	target: 'node' | 'cloudflare';
+	target: 'node' | 'cloudflare' | 'celld';
 	/** Defaults to 3583 ("FLUE" on a phone keypad). */
 	port?: number;
 	strictPort?: boolean;
@@ -94,6 +94,16 @@ interface DevReloader {
  * — the user is editing code, after all, and we want to recover when they fix it.
  */
 export async function dev(options: DevOptions): Promise<void> {
+	if (options.target === 'celld') {
+		// celld runs Durable Objects against an object-storage bucket you own;
+		// there is no local simulator to point a dev server at. The iteration
+		// loop is build → `celld deploy` → a running celld node.
+		throw new Error(
+			'[flue] `flue dev` is not supported on the celld target. ' +
+				'Build with `flue build --target celld`, deploy with `celld deploy`, ' +
+				'and iterate against a running celld node (https://celld.dev/docs).',
+		);
+	}
 	const startedAt = Date.now();
 	const root = path.resolve(options.root);
 	const sourceRoot = path.resolve(options.sourceRoot);

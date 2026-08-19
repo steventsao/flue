@@ -15,64 +15,77 @@ import {
 import { note } from './terminal.ts';
 import type { BuildContext, BuildPlugin, ViteCloudflareInputs } from './types.ts';
 
-export class CloudflarePlugin implements BuildPlugin {
-	name = 'cloudflare';
-	bundle: BuildPlugin['bundle'] = 'vite-cloudflare';
-	entryFilename = '_entry.ts';
+/** Targets that compile Flue agents/workflows into Durable Object classes. */
+export type DurableObjectsTarget = 'cloudflare' | 'celld';
 
-	async generateEntryPoint(ctx: BuildContext): Promise<string> {
-		const { agents, appEntry, channels, cloudflareEntry, workflows } = ctx;
-		const temporaryLocalExposure = JSON.stringify(ctx.temporaryLocalExposure);
-		validateCloudflareAgentNames(ctx);
-		validateCloudflareExportNames(ctx);
-		if (ctx.dbEntry) {
-			throw new Error(
-				`[flue] Custom persistence (db.ts) is not supported on the Cloudflare target. ` +
-					`Cloudflare agents use Durable Object SQLite automatically. ` +
-					`Remove the db.ts file or move it outside the source root.`,
-			);
-		}
+/**
+ * Generate the Worker + Durable Object entry point shared by the Cloudflare
+ * and celld targets. celld runs Cloudflare-Workers-compatible bundles with
+ * Durable Objects on self-hosted infrastructure, so the generated code is
+ * identical except where the bundler (esbuild, not Vite) or the platform
+ * surface (no Workers AI binding unless the fleet provides one) differs.
+ */
+export async function generateDurableObjectsEntryPoint(
+	ctx: BuildContext,
+	target: DurableObjectsTarget,
+): Promise<string> {
+	const { agents, appEntry, channels, cloudflareEntry, workflows } = ctx;
+	const temporaryLocalExposure = JSON.stringify(ctx.temporaryLocalExposure);
+	const targetLabel = target === 'celld' ? 'celld' : 'Cloudflare';
+	// celld deploys through its own esbuild step, not Vite — `import.meta.env`
+	// is undefined there, so Vite-specific dev-mode expressions must not
+	// appear in the celld entry.
+	const devModeExpression = target === 'celld' ? 'false' : 'import.meta.env.DEV';
+	validateCloudflareAgentNames(ctx, targetLabel);
+	validateCloudflareExportNames(ctx, targetLabel);
+	if (ctx.dbEntry) {
+		throw new Error(
+			`[flue] Custom persistence (db.ts) is not supported on the ${targetLabel} target. ` +
+				`${targetLabel} agents use Durable Object SQLite automatically. ` +
+				`Remove the db.ts file or move it outside the source root.`,
+		);
+	}
 
-		const agentImports = agents
-			.map((a, index) => {
-				const varName = agentVarName(a.name, index);
-				return `import * as ${varName} from ${JSON.stringify(a.filePath.replace(/\\/g, '/'))};`;
-			})
-			.join('\n');
-		const agentModuleEntries = agents
-			.map((a, index) => `  ${JSON.stringify(a.name)}: ${agentVarName(a.name, index)},`)
-			.join('\n');
-		const workflowImports = workflows
-			.map((workflow, index) => {
-				const varName = workflowVarName(workflow.name, index);
-				return `import * as ${varName} from ${JSON.stringify(workflow.filePath.replace(/\\/g, '/'))};`;
-			})
-			.join('\n');
-		const workflowModuleEntries = workflows
-			.map(
-				(workflow, index) =>
-					`  ${JSON.stringify(workflow.name)}: ${workflowVarName(workflow.name, index)},`,
-			)
-			.join('\n');
-		const channelImports = channels
-			.map((channel, index) => {
-				const varName = channelVarName(channel.name, index);
-				return `import * as ${varName} from ${JSON.stringify(channel.filePath.replace(/\\/g, '/'))};`;
-			})
-			.join('\n');
-		const channelModuleEntries = channels
-			.map(
-				(channel, index) =>
-					`  ${JSON.stringify(channel.name)}: ${channelVarName(channel.name, index)},`,
-			)
-			.join('\n');
+	const agentImports = agents
+		.map((a, index) => {
+			const varName = agentVarName(a.name, index);
+			return `import * as ${varName} from ${JSON.stringify(a.filePath.replace(/\\/g, '/'))};`;
+		})
+		.join('\n');
+	const agentModuleEntries = agents
+		.map((a, index) => `  ${JSON.stringify(a.name)}: ${agentVarName(a.name, index)},`)
+		.join('\n');
+	const workflowImports = workflows
+		.map((workflow, index) => {
+			const varName = workflowVarName(workflow.name, index);
+			return `import * as ${varName} from ${JSON.stringify(workflow.filePath.replace(/\\/g, '/'))};`;
+		})
+		.join('\n');
+	const workflowModuleEntries = workflows
+		.map(
+			(workflow, index) =>
+				`  ${JSON.stringify(workflow.name)}: ${workflowVarName(workflow.name, index)},`,
+		)
+		.join('\n');
+	const channelImports = channels
+		.map((channel, index) => {
+			const varName = channelVarName(channel.name, index);
+			return `import * as ${varName} from ${JSON.stringify(channel.filePath.replace(/\\/g, '/'))};`;
+		})
+		.join('\n');
+	const channelModuleEntries = channels
+		.map(
+			(channel, index) =>
+				`  ${JSON.stringify(channel.name)}: ${channelVarName(channel.name, index)},`,
+		)
+		.join('\n');
 
-		const agentClasses = agents
-			.map(
-				(
-					agent,
-					index,
-				) => `const agentExtension${index} = resolveCloudflareExtension(agentModules[${JSON.stringify(agent.name)}], ${JSON.stringify(agent.name)}, 'Agent');
+	const agentClasses = agents
+		.map(
+			(
+				agent,
+				index,
+			) => `const agentExtension${index} = resolveCloudflareExtension(agentModules[${JSON.stringify(agent.name)}], ${JSON.stringify(agent.name)}, 'Agent');
 const ${agentClassName(agent.name)} = class ${agentClassName(agent.name)} extends agentExtension${index}.base(Agent) {
   constructor(ctx, env) {
     const prepared = cloudflareAgents.prepare({ storage: ctx.storage, className: ${JSON.stringify(agentClassName(agent.name))}, agentName: ${JSON.stringify(agent.name)} });
@@ -98,15 +111,15 @@ const ${agentClassName(agent.name)} = class ${agentClassName(agent.name)} extend
 };
 const Wrapped${agentClassName(agent.name)} = agentExtension${index}.wrap(${agentClassName(agent.name)});
 export { Wrapped${agentClassName(agent.name)} as ${agentClassName(agent.name)} };`,
-			)
-			.join('\n\n');
+		)
+		.join('\n\n');
 
-		const workflowClasses = workflows
-			.map(
-				(
-					workflow,
-					index,
-				) => `const workflowExtension${index} = resolveCloudflareExtension(workflowModules[${JSON.stringify(workflow.name)}], ${JSON.stringify(workflow.name)}, 'Workflow');
+	const workflowClasses = workflows
+		.map(
+			(
+				workflow,
+				index,
+			) => `const workflowExtension${index} = resolveCloudflareExtension(workflowModules[${JSON.stringify(workflow.name)}], ${JSON.stringify(workflow.name)}, 'Workflow');
 const ${workflowClassName(workflow.name)} = class ${workflowClassName(workflow.name)} extends workflowExtension${index}.base(Agent) {
   async onRequest(request) {
     return dispatchWorkflow(request, this, ${JSON.stringify(workflow.name)});
@@ -123,42 +136,42 @@ const ${workflowClassName(workflow.name)} = class ${workflowClassName(workflow.n
 };
 const Wrapped${workflowClassName(workflow.name)} = workflowExtension${index}.wrap(${workflowClassName(workflow.name)});
 export { Wrapped${workflowClassName(workflow.name)} as ${workflowClassName(workflow.name)} };`,
-			)
-			.join('\n\n');
+		)
+		.join('\n\n');
 
-		const agentIdentityEntries = agents
-			.map(
-				(agent) =>
-					`  ${JSON.stringify(agent.name)}: { bindingName: ${JSON.stringify(agentBindingName(agent.name))}, className: ${JSON.stringify(agentClassName(agent.name))} },`,
-			)
-			.join('\n');
-		const workflowIdentityEntries = workflows
-			.map(
-				(workflow) =>
-					`  ${JSON.stringify(workflow.name)}: { bindingName: ${JSON.stringify(workflowBindingName(workflow.name))}, className: ${JSON.stringify(workflowClassName(workflow.name))} },`,
-			)
-			.join('\n');
+	const agentIdentityEntries = agents
+		.map(
+			(agent) =>
+				`  ${JSON.stringify(agent.name)}: { bindingName: ${JSON.stringify(agentBindingName(agent.name))}, className: ${JSON.stringify(agentClassName(agent.name))} },`,
+		)
+		.join('\n');
+	const workflowIdentityEntries = workflows
+		.map(
+			(workflow) =>
+				`  ${JSON.stringify(workflow.name)}: { bindingName: ${JSON.stringify(workflowBindingName(workflow.name))}, className: ${JSON.stringify(workflowClassName(workflow.name))} },`,
+		)
+		.join('\n');
 
-		const userAppImport = appEntry
-			? `import userApp from ${JSON.stringify(appEntry.replace(/\\/g, '/'))};`
-			: '';
-		const userCloudflareImport = cloudflareEntry
-			? `import * as userCloudflareModule from ${JSON.stringify(cloudflareEntry.replace(/\\/g, '/'))};`
-			: '';
-		const userCloudflareReExport = cloudflareEntry
-			? `export * from ${JSON.stringify(cloudflareEntry.replace(/\\/g, '/'))};`
-			: '';
-		const userCloudflareValue = cloudflareEntry ? 'userCloudflareModule' : '{}';
-		const reservedCloudflareExportNames = [
-			...agents.map((agent) => agentClassName(agent.name)),
-			...workflows.map((workflow) => workflowClassName(workflow.name)),
-			'FlueRegistry',
-		];
+	const userAppImport = appEntry
+		? `import userApp from ${JSON.stringify(appEntry.replace(/\\/g, '/'))};`
+		: '';
+	const userCloudflareImport = cloudflareEntry
+		? `import * as userCloudflareModule from ${JSON.stringify(cloudflareEntry.replace(/\\/g, '/'))};`
+		: '';
+	const userCloudflareReExport = cloudflareEntry
+		? `export * from ${JSON.stringify(cloudflareEntry.replace(/\\/g, '/'))};`
+		: '';
+	const userCloudflareValue = cloudflareEntry ? 'userCloudflareModule' : '{}';
+	const reservedCloudflareExportNames = [
+		...agents.map((agent) => agentClassName(agent.name)),
+		...workflows.map((workflow) => workflowClassName(workflow.name)),
+		'FlueRegistry',
+	];
 
-		const builtModuleNormalizationSource = generateBuiltModuleNormalizationSource();
+	const builtModuleNormalizationSource = generateBuiltModuleNormalizationSource();
 
-		return `
-// Auto-generated by flue (target: cloudflare)
+	return `
+// Auto-generated by flue (target: ${target})
 import { env } from 'cloudflare:workers';
 import { Agent, getAgentByName } from 'agents';
 import {
@@ -207,10 +220,14 @@ ${userCloudflareReExport}
 // \`registerProvider('cloudflare', ...)\` runs first; the guard below
 // preserves it. The runtime routes registrations without an explicit
 // \`gateway\` through Cloudflare's default AI Gateway.
+//
+// The env.AI guard keeps this entry loadable where no AI binding exists —
+// notably celld fleets, which only expose one via the experimental
+// CELLD_AI_URL adapter.
 
 registerApiProvider(getCloudflareAIBindingApiProvider());
 
-if (!hasRegisteredProvider('cloudflare')) {
+if (env.AI && !hasRegisteredProvider('cloudflare')) {
   registerProvider('cloudflare', {
     api: 'cloudflare-ai-binding',
     binding: env.AI,
@@ -372,7 +389,7 @@ function createEventStreamStoreForInstance(doInstance) {
   return store;
 }
 
-const devLifecycle = import.meta.env.DEV ? installDevLifecycleLogger() : undefined;
+const devLifecycle = ${devModeExpression} ? installDevLifecycleLogger() : undefined;
 const cloudflareAgents = createCloudflareAgentRuntime({
   agents,
   createContext: createAgentContextForRequest,
@@ -527,7 +544,7 @@ export { FlueRegistry };
 
 configureFlueRuntime({
   target: 'cloudflare',
-  devMode: import.meta.env.DEV,
+  devMode: ${devModeExpression},
   temporaryLocalExposure: ${temporaryLocalExposure},
   agents,
   workflows,
@@ -594,23 +611,20 @@ export default {
   },
 };
 `;
+}
+
+/** Cloudflare build plugin. Deploys the generated Worker via the official Cloudflare Vite integration. */
+export class CloudflarePlugin implements BuildPlugin {
+	name = 'cloudflare';
+	bundle: BuildPlugin['bundle'] = 'vite-cloudflare';
+	entryFilename = '_entry.ts';
+
+	async generateEntryPoint(ctx: BuildContext): Promise<string> {
+		return generateDurableObjectsEntryPoint(ctx, 'cloudflare');
 	}
 
 	async viteInputs(ctx: BuildContext): Promise<ViteCloudflareInputs> {
-		const flueBindings: Array<{ name: string; class_name: string }> = ctx.agents.map((agent) => ({
-			name: agentBindingName(agent.name),
-			class_name: agentClassName(agent.name),
-		}));
-
-		for (const workflow of ctx.workflows) {
-			flueBindings.push({
-				name: workflowBindingName(workflow.name),
-				class_name: workflowClassName(workflow.name),
-			});
-		}
-
-		const FLUE_REGISTRY_BINDING = { name: 'FLUE_REGISTRY', class_name: 'FlueRegistry' };
-		flueBindings.push(FLUE_REGISTRY_BINDING);
+		const flueBindings = flueDurableObjectBindings(ctx);
 
 		// Read and validate the user's wrangler config (if any). User's file
 		// lives at the project root and is never modified; the composed Vite
@@ -654,7 +668,29 @@ export default {
 
 const CLOUDFLARE_AGENT_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 
-function validateCloudflareExportNames(ctx: BuildContext): void {
+/**
+ * Flue's generated Durable Object bindings for a build: one per agent, one per
+ * workflow, plus the singleton registry index. Shared by the Cloudflare and
+ * celld targets, which generate identical Durable Object classes.
+ */
+export function flueDurableObjectBindings(
+	ctx: BuildContext,
+): Array<{ name: string; class_name: string }> {
+	const bindings: Array<{ name: string; class_name: string }> = ctx.agents.map((agent) => ({
+		name: agentBindingName(agent.name),
+		class_name: agentClassName(agent.name),
+	}));
+	for (const workflow of ctx.workflows) {
+		bindings.push({
+			name: workflowBindingName(workflow.name),
+			class_name: workflowClassName(workflow.name),
+		});
+	}
+	bindings.push({ name: 'FLUE_REGISTRY', class_name: 'FlueRegistry' });
+	return bindings;
+}
+
+function validateCloudflareExportNames(ctx: BuildContext, targetLabel: string): void {
 	const entries = [
 		...ctx.agents.map((agent) => ({
 			name: agentClassName(agent.name),
@@ -678,11 +714,11 @@ function validateCloudflareExportNames(ctx: BuildContext): void {
 		.join(', ');
 	if (!conflicts) return;
 	throw new Error(
-		`[flue] Cloudflare target generated conflicting Worker export name(s): ${conflicts}. Rename the conflicting agent or workflow file.`,
+		`[flue] ${targetLabel} target generated conflicting Worker export name(s): ${conflicts}. Rename the conflicting agent or workflow file.`,
 	);
 }
 
-function validateCloudflareAgentNames(ctx: BuildContext): void {
+function validateCloudflareAgentNames(ctx: BuildContext, targetLabel: string): void {
 	// Agents and workflows both materialize as per-definition Durable Object
 	// classes and bindings, so both need predictable generated identifiers.
 	// Validate together with a shared message.
@@ -704,7 +740,7 @@ function validateCloudflareAgentNames(ctx: BuildContext): void {
 	].join(', ');
 
 	throw new Error(
-		`[flue] Cloudflare target requires agent and workflow filenames to use lower-kebab-case so ` +
+		`[flue] ${targetLabel} target requires agent and workflow filenames to use lower-kebab-case so ` +
 			`generated Durable Object identifiers remain predictable. Invalid file(s): ${invalidList}. ` +
 			`Rename them to match ${CLOUDFLARE_AGENT_NAME_PATTERN}.`,
 	);

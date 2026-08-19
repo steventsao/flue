@@ -91,12 +91,15 @@ export interface BuildPlugin {
 	 *     Vite authored-module graph.
 	 *   - `'vite-cloudflare'`: write the Cloudflare source entry used by the
 	 *     official Cloudflare Vite integration.
+	 *   - `'celld'`: write a self-contained celld-deployable Wrangler project
+	 *     (generated source entry + `wrangler.json`) into the output directory.
+	 *     No Vite build — `celld deploy` bundles the entry itself with esbuild.
 	 */
-	bundle: 'vite' | 'vite-cloudflare';
+	bundle: 'vite' | 'vite-cloudflare' | 'celld';
 	/**
-	 * The filename to use for the generated Cloudflare source entry. Required
-	 * when `bundle === 'vite-cloudflare'`. Node bundled output is always
-	 * `server.mjs` and ignores this field.
+	 * The filename to use for the generated source entry. Required when
+	 * `bundle === 'vite-cloudflare'` or `bundle === 'celld'`. Node bundled
+	 * output is always `server.mjs` and ignores this field.
 	 */
 	entryFilename?: string;
 	/** Package names that Vite should preserve as external runtime dependencies. */
@@ -108,8 +111,8 @@ export interface BuildPlugin {
 	 */
 	additionalOutputs?(ctx: BuildContext): Record<string, string> | Promise<Record<string, string>>;
 	/**
-	 * Inputs for the `'vite-cloudflare'` strategy. Required when
-	 * `bundle === 'vite-cloudflare'`; ignored otherwise. May be async.
+	 * Inputs for the `'vite-cloudflare'` and `'celld'` strategies. Required
+	 * when `bundle` is one of those; ignored otherwise. May be async.
 	 */
 	viteInputs?(ctx: BuildContext): ViteCloudflareInputs | Promise<ViteCloudflareInputs>;
 }
@@ -141,7 +144,7 @@ export interface BuildOptions {
 	 * time, not `root`.
 	 */
 	output?: string;
-	target?: 'node' | 'cloudflare';
+	target?: 'node' | 'cloudflare' | 'celld';
 	mode?: 'build' | 'development';
 	/** Controls human build progress output. Defaults to `normal`. */
 	log?: 'normal' | 'silent';

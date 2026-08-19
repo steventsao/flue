@@ -2,7 +2,12 @@ import * as fs from 'node:fs';
 import path from 'node:path';
 import { createFlueClient, type FlueClient } from '@flue/sdk';
 import { ulid } from 'ulidx';
-import { type FlueConfig, resolveConfig, resolveConfigPath, type UserFlueConfig } from './config.ts';
+import {
+	type FlueConfig,
+	resolveConfig,
+	resolveConfigPath,
+	type UserFlueConfig,
+} from './config.ts';
 import { createEnvLoader, type EnvLoader, selectEnvFile } from './env.ts';
 import {
 	type LocalHttpRuntime,
@@ -15,7 +20,7 @@ import { type RunResource, resolveRunResource } from './run-resource.ts';
 
 export interface ExecutionLifecycleOptions {
 	resource: string;
-	target?: 'node' | 'cloudflare';
+	target?: 'node' | 'cloudflare' | 'celld';
 	server?: string;
 	headers?: string[];
 	explicitRoot?: string;
@@ -30,7 +35,7 @@ export interface ExecutionLifecycleOptions {
 interface PreparedExecution {
 	readonly resource: RunResource;
 	readonly instanceId: string | undefined;
-	readonly target: 'node' | 'cloudflare' | undefined;
+	readonly target: 'node' | 'cloudflare' | 'celld' | undefined;
 	readonly root: string | undefined;
 	readonly configPath: string | undefined;
 	readonly envFile: string | undefined;
@@ -192,7 +197,9 @@ export function createExecutionLifecycle(options: ExecutionLifecycleOptions): Ex
 	}
 }
 
-async function resolveLocalApplication(options: ExecutionLifecycleOptions): Promise<LocalApplication> {
+async function resolveLocalApplication(
+	options: ExecutionLifecycleOptions,
+): Promise<LocalApplication> {
 	const cwd = process.cwd();
 	const searchFrom = options.explicitRoot ?? cwd;
 	const initialConfigPath =
@@ -240,7 +247,9 @@ function resolveRemoteResource(value: string): RunResource {
 }
 
 function snapshotFiles(paths: readonly string[]): Map<string, string | undefined> {
-	return new Map(paths.map((file) => [file, fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined]));
+	return new Map(
+		paths.map((file) => [file, fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined]),
+	);
 }
 
 function restoreFiles(snapshot: ReadonlyMap<string, string | undefined>): void {

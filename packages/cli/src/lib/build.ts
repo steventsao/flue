@@ -3,9 +3,10 @@ import { builtinModules, createRequire } from 'node:module';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { packageUpSync } from 'package-up';
+import { CelldPlugin } from './build-plugin-celld.ts';
 import { CloudflarePlugin } from './build-plugin-cloudflare.ts';
 import { NodePlugin } from './build-plugin-node.ts';
-import { brandRows, section, success } from './terminal.ts';
+import { brandRows, note, section, success } from './terminal.ts';
 import type {
 	AgentInfo,
 	BuildContext,
@@ -69,10 +70,7 @@ async function buildApplication(options: BuildOptions): Promise<BuildResult> {
 			['source', rel(sourceRoot)],
 			['app', appEntry ? rel(appEntry) : undefined],
 			['database', dbEntry ? rel(dbEntry) : undefined],
-			[
-				'cloudflare',
-				cloudflareEntry && plugin.name === 'cloudflare' ? rel(cloudflareEntry) : undefined,
-			],
+			['cloudflare', cloudflareEntry && plugin.name !== 'node' ? rel(cloudflareEntry) : undefined],
 		]);
 		section(
 			'agents',
@@ -195,6 +193,35 @@ async function buildApplication(options: BuildOptions): Promise<BuildResult> {
 		});
 		if (verbose) success(`built ${rel(output)}`);
 		anyChanged = true;
+	} else if (bundleStrategy === 'celld') {
+		if (!plugin.entryFilename || !plugin.viteInputs) {
+			throw new Error(
+				`[flue] Plugin "${plugin.name}" set bundle: 'celld' but did not provide its generated entry and Wrangler inputs.`,
+			);
+		}
+		const inputs = await plugin.viteInputs(ctx);
+		// The output directory is the deployable unit (`celld deploy <output>`),
+		// so rebuild it from scratch — stale artifacts from earlier builds or
+		// other targets must not leak into a deployment.
+		fs.rmSync(output, { recursive: true, force: true });
+		fs.mkdirSync(output, { recursive: true });
+		const inputFiles: Array<[string, string]> = [
+			[path.join(output, plugin.entryFilename), serverCode],
+			[path.join(output, 'wrangler.json'), inputs.wranglerConfig],
+			...Object.entries(inputs.entryDirFiles ?? {}).map(([filename, content]): [string, string] => [
+				path.join(output, filename),
+				content,
+			]),
+		];
+		for (const [filePath, content] of inputFiles) {
+			fs.mkdirSync(path.dirname(filePath), { recursive: true });
+			fs.writeFileSync(filePath, content, 'utf-8');
+		}
+		if (verbose) {
+			success(`built ${rel(output)}`);
+			note(`deploy with: celld deploy ${rel(output)} --bucket <s3-or-gs-bucket>`);
+		}
+		anyChanged = true;
 	}
 
 	if (plugin.additionalOutputs) {
@@ -241,7 +268,8 @@ function resolvePlugin(options: BuildOptions): BuildPlugin {
 		throw new Error(
 			'[flue] No build target specified. Use --target to choose a target:\n' +
 				'  flue build --target node\n' +
-				'  flue build --target cloudflare',
+				'  flue build --target cloudflare\n' +
+				'  flue build --target celld',
 		);
 	}
 
@@ -250,9 +278,11 @@ function resolvePlugin(options: BuildOptions): BuildPlugin {
 			return new NodePlugin();
 		case 'cloudflare':
 			return new CloudflarePlugin();
+		case 'celld':
+			return new CelldPlugin();
 		default:
 			throw new Error(
-				`[flue] Unknown target: "${options.target}". Supported targets: node, cloudflare`,
+				`[flue] Unknown target: "${options.target}". Supported targets: node, cloudflare, celld`,
 			);
 	}
 }

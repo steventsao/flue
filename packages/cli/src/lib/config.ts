@@ -26,8 +26,10 @@ export interface UserFlueConfig {
 	 *
 	 * - `'node'` builds a Node.js server.
 	 * - `'cloudflare'` builds a Workers-compatible application.
+	 * - `'celld'` builds a Wrangler project deployable to a self-hosted celld
+	 *   fleet with `celld deploy` (https://celld.dev).
 	 */
-	target?: 'node' | 'cloudflare';
+	target?: 'node' | 'cloudflare' | 'celld';
 	/**
 	 * Project root. Must not be empty. Relative values loaded from a
 	 * configuration file resolve from the directory containing that file;
@@ -51,7 +53,7 @@ export interface UserFlueConfig {
 /** Fully resolved configuration consumed by the rest of the CLI. */
 export interface FlueConfig {
 	/** Selected build and development target. */
-	target: 'node' | 'cloudflare';
+	target: 'node' | 'cloudflare' | 'celld';
 	/** Absolute project-root path. */
 	root: string;
 	/** Absolute directory from which authored modules are discovered. */
@@ -78,7 +80,7 @@ export function defineConfig(config: UserFlueConfig): UserFlueConfig {
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 
-const TargetSchema = v.picklist(['node', 'cloudflare'] as const);
+const TargetSchema = v.picklist(['node', 'cloudflare', 'celld'] as const);
 
 const NonEmptyPathSchema = v.pipe(v.string(), v.minLength(1, 'Path must not be empty.'));
 
@@ -278,8 +280,8 @@ export async function resolveConfig(opts: ResolveConfigOptions): Promise<Resolve
 	// error pointing the user at both available knobs.
 	if (!merged.target) {
 		throw new Error(
-			'[flue] Missing required `target`. Set it via `--target <node|cloudflare>` ' +
-				'or in `flue.config.ts` as `target: "node"` (or `"cloudflare"`).',
+			'[flue] Missing required `target`. Set it via `--target <node|cloudflare|celld>` ' +
+				'or in `flue.config.ts` as `target: "node"` (or `"cloudflare"`, `"celld"`).',
 		);
 	}
 

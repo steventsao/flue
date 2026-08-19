@@ -30,7 +30,7 @@ import { brand, brandRows, error as cliError, note, row, success } from '../src/
 import { BLUEPRINTS, KIND_ROOTS } from './_blueprints.generated.ts';
 
 interface ApplicationConfigArgs {
-	target?: 'node' | 'cloudflare';
+	target?: 'node' | 'cloudflare' | 'celld';
 	explicitRoot: string | undefined;
 	explicitOutput: string | undefined;
 	configFile: string | undefined;
@@ -57,7 +57,7 @@ function loadCliEnvironment(args: ApplicationConfigArgs): EnvLoader {
 
 /** Resolve CLI flags, config file values, and defaults into one config. */
 async function resolveCliConfig(args: {
-	target?: 'node' | 'cloudflare';
+	target?: 'node' | 'cloudflare' | 'celld';
 	explicitRoot: string | undefined;
 	explicitOutput: string | undefined;
 	configFile: string | undefined;
@@ -97,10 +97,10 @@ async function resolveApplicationCommand(args: ApplicationConfigArgs): Promise<{
 function printUsage(log: (message: string) => void = console.error) {
 	log(
 		'Usage:\n' +
-			'  flue dev   [--target <node|cloudflare>] [--root <path>] [--output <path>] [--config <path>] [--port <number>] [--env <path>]\n' +
-			"  flue run     <name> [--target <node|cloudflare>] [--id <id>] [--input <json>] [--server <path|url>] [--header 'Name: value'] [--root <path>] [--output <path>] [--config <path>] [--env <path>]\n" +
-			'  flue build   [--target <node|cloudflare>] [--root <path>] [--output <path>] [--config <path>] [--env <path>]\n' +
-			'  flue init  --target <node|cloudflare> [--root <path>] [--force]\n' +
+			'  flue dev   [--target <node|cloudflare|celld>] [--root <path>] [--output <path>] [--config <path>] [--port <number>] [--env <path>]\n' +
+			"  flue run     <name> [--target <node|cloudflare|celld>] [--id <id>] [--input <json>] [--server <path|url>] [--header 'Name: value'] [--root <path>] [--output <path>] [--config <path>] [--env <path>]\n" +
+			'  flue build   [--target <node|cloudflare|celld>] [--root <path>] [--output <path>] [--config <path>] [--env <path>]\n' +
+			'  flue init  --target <node|cloudflare|celld> [--root <path>] [--force]\n' +
 			'  flue add   [<kind> <name|url>] [--print]\n' +
 			'  flue update <kind> <name|url> [--print]\n' +
 			'  flue docs  [read <path> | search <query>]\n' +
@@ -153,7 +153,7 @@ function printUsage(log: (message: string) => void = console.error) {
 interface RunArgs {
 	command: 'run';
 	resource: string;
-	target: 'node' | 'cloudflare' | undefined;
+	target: 'node' | 'cloudflare' | 'celld' | undefined;
 	input: string | undefined;
 	id: string | undefined;
 	server: string | undefined;
@@ -167,7 +167,7 @@ interface RunArgs {
 interface BuildArgs {
 	command: 'build';
 	/** May be undefined if the user is relying on `flue.config.ts` for `target`. */
-	target: 'node' | 'cloudflare' | undefined;
+	target: 'node' | 'cloudflare' | 'celld' | undefined;
 	/** Explicit --root value, or undefined to default to cwd. */
 	explicitRoot: string | undefined;
 	/** Explicit --output value, or undefined to default to <root>/dist. */
@@ -180,7 +180,7 @@ interface BuildArgs {
 interface DevArgs {
 	command: 'dev';
 	/** May be undefined if the user is relying on `flue.config.ts` for `target`. */
-	target: 'node' | 'cloudflare' | undefined;
+	target: 'node' | 'cloudflare' | 'celld' | undefined;
 	/** Explicit --root value, or undefined to default to cwd. */
 	explicitRoot: string | undefined;
 	/** Explicit --output value, or undefined to default to <root>/dist. */
@@ -218,7 +218,7 @@ interface DocsArgs {
 
 interface InitArgs {
 	command: 'init';
-	target: 'node' | 'cloudflare';
+	target: 'node' | 'cloudflare' | 'celld';
 	/** Explicit --root value, or undefined to default to cwd. Absolute when set. */
 	explicitRoot: string | undefined;
 	force: boolean;
@@ -321,9 +321,9 @@ function booleanFlag(values: CliValues, name: string, flag: string): boolean {
 	return true;
 }
 
-function targetFlag(value: string | undefined): 'node' | 'cloudflare' | undefined {
-	if (value !== undefined && value !== 'node' && value !== 'cloudflare') {
-		fail(`Invalid target: "${value}". Supported targets: node, cloudflare`);
+function targetFlag(value: string | undefined): 'node' | 'cloudflare' | 'celld' | undefined {
+	if (value !== undefined && value !== 'node' && value !== 'cloudflare' && value !== 'celld') {
+		fail(`Invalid target: "${value}". Supported targets: node, cloudflare, celld`);
 	}
 	return value;
 }
@@ -334,7 +334,7 @@ function parseFlags(
 	allowed: ReadonlySet<string>,
 ): {
 	positionals: string[];
-	target?: 'node' | 'cloudflare';
+	target?: 'node' | 'cloudflare' | 'celld';
 	explicitRoot: string | undefined;
 	explicitOutput: string | undefined;
 	configFile: string | undefined;
@@ -896,7 +896,7 @@ async function run(args: RunArgs) {
 
 // ─── `flue init` ────────────────────────────────────────────────────────────
 
-function renderConfigTemplate(target: 'node' | 'cloudflare'): string {
+function renderConfigTemplate(target: 'node' | 'cloudflare' | 'celld'): string {
 	return (
 		`import { defineConfig } from '@flue/cli/config';\n` +
 		`\n` +
