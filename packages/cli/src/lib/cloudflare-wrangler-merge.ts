@@ -16,6 +16,7 @@
 import * as fs from 'node:fs';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -81,7 +82,9 @@ export async function readUserWranglerConfig(root: string): Promise<UserConfigRe
 	try {
 		const cloudflareViteRequire = createRequire(import.meta.resolve('@cloudflare/vite-plugin'));
 		const wranglerPath = cloudflareViteRequire.resolve('wrangler');
-		wrangler = (await import(wranglerPath)) as typeof wrangler;
+		// `wranglerPath` is an absolute filesystem path; dynamic import() needs a
+		// file:// URL on Windows.
+		wrangler = (await import(pathToFileURL(wranglerPath).href)) as typeof wrangler;
 	} catch (err) {
 		throw new Error(
 			`[flue] Reading the Cloudflare wrangler config requires the Wrangler version provided by "@cloudflare/vite-plugin".\n` +
