@@ -1,6 +1,6 @@
 # Flue
 
-Flue is a TypeScript framework for building autonomous AI agents and running them anywhere. An agent is a plain exported function: hooks in its body compose its capabilities — model (`useModel`), tools, skills, sandboxes, state — and its return value is its instruction. Agents live in durable conversations: accepted input survives crashes, restarts, and redeploys, and interrupted work recovers to a deterministic state. Applications build with Vite (the `flue()` plugin plus an explicit `app.ts` route map) and deploy to Node.js or Cloudflare Workers from the same source, with persistence adapters (SQLite, Postgres, MySQL, MongoDB, Redis, and more), channels that turn provider webhooks (Slack, GitHub, Telegram, ...) into agent conversations, and clients — the Flue Agent SDK (`@flue/sdk`), `@flue/react`, and the `flue` CLI — for driving conversations over HTTP or from code. The model layer is [Pi](https://pi.dev)'s provider protocol, used directly.
+Flue is a TypeScript framework for building autonomous AI agents and running them anywhere. An agent is a plain exported function: hooks in its body compose its capabilities — model (`useModel`), tools, skills, sandboxes, state — and its return value is its instruction. Agents live in durable conversations: accepted input survives crashes, restarts, and redeploys, and interrupted work recovers to a deterministic state. Applications build with Vite (the `flue()` plugin plus an explicit `app.ts` route map) and deploy to Node.js, Cloudflare Workers, or a self-hosted celld fleet from the same source, with persistence adapters (SQLite, Postgres, MySQL, MongoDB, Redis, and more), channels that turn provider webhooks (Slack, GitHub, Telegram, ...) into agent conversations, and clients — the Flue Agent SDK (`@flue/sdk`), `@flue/react`, and the `flue` CLI — for driving conversations over HTTP or from code. The model layer is [Pi](https://pi.dev)'s provider protocol, used directly.
 
 ## Contributing
 
@@ -35,7 +35,7 @@ A blueprint is a Markdown implementation guide returned by `flue add`; its kind 
 ## Project Structure
 
 - `packages/runtime/` — Runtime library (`@flue/runtime`): sessions, agent harnesses, tools, sandbox plumbing, and the `/config` loader for `flue.config.ts`.
-- `packages/vite/` — The `flue()` Vite plugin (`@flue/vite`): `'use agent'` scan/transform, generated bootstraps, Node dev/build, and the Cloudflare target adapter.
+- `packages/vite/` — The `flue()` Vite plugin (`@flue/vite`): `'use agent'` scan/transform, generated bootstraps, Node dev/build, and the Cloudflare and celld target adapters.
 - `packages/cli/` — CLI (`@flue/cli`): `flue run` transport-free local execution, `init`, blueprint `add`/`update`, and offline `docs`.
 - `examples/` — Integration examples for channels, databases, sandboxes, and deployment targets.
 - `demo/` — Standalone Vite+React chat SPA that connects to any running Flue example server.

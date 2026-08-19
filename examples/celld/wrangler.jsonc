@@ -1,0 +1,12 @@
+{
+	// celld accepts a subset of the wrangler config (name, compatibility
+	// settings, durable_objects, migrations, assets, services, vars); anything
+	// else fails the build. flue() reads this file and writes the merged
+	// deploy config to dist/wrangler.json on `vite build`.
+	"name": "celld",
+	"compatibility_date": "2026-06-01",
+	// Every agent generates a Durable Object class named after its identity
+	// (Hello -> FlueHelloAgent); declare a migration entry per class, appending
+	// a new tag when you add an agent.
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["FlueHelloAgent"] }]
+}

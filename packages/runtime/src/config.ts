@@ -38,12 +38,15 @@ export interface FlueConfig {
 	 *
 	 * - `'node'` builds a Node.js server.
 	 * - `'cloudflare'` builds a Workers-compatible application.
+	 * - `'celld'` builds a self-contained Worker bundle plus a celld-subset
+	 *   `wrangler.json`, deployable to a self-hosted celld fleet with
+	 *   `celld deploy` (https://celld.dev).
 	 *
 	 * Optional: the Vite plugin auto-detects `'cloudflare'` from the presence
 	 * of the `@cloudflare/vite-plugin` sibling when unset; `flue run` is
 	 * always Node-local.
 	 */
-	target?: 'node' | 'cloudflare';
+	target?: 'node' | 'cloudflare' | 'celld';
 	/**
 	 * Path to the application entry (`app.ts`), the project's route map.
 	 * Relative values resolve from the config file's directory. Defaults to
@@ -118,7 +121,7 @@ const ProviderIdSchema = v.pipe(
 );
 
 const FlueConfigSchema = v.strictObject({
-	target: v.optional(v.picklist(['node', 'cloudflare'] as const)),
+	target: v.optional(v.picklist(['node', 'cloudflare', 'celld'] as const)),
 	app: v.optional(NonEmptyPathSchema),
 	db: v.optional(NonEmptyPathSchema),
 	cloudflare: v.optional(NonEmptyPathSchema),
@@ -330,7 +333,7 @@ export interface ResolvedFlueProject {
 	/** Absolute directory authored modules are discovered from. */
 	sourceRoot: string;
 	/** Selected target, when configured. */
-	target: 'node' | 'cloudflare' | undefined;
+	target: 'node' | 'cloudflare' | 'celld' | undefined;
 	/** Absolute `app.*` entry path, or `undefined` when none exists. */
 	app: string | undefined;
 	/** Absolute `db.*` entry path, or `undefined` when none exists. */

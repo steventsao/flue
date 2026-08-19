@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import type { Plugin } from 'vite';
 
 interface CloudflareAgentsResolverState {
-	readonly target: 'node' | 'cloudflare';
+	readonly target: 'node' | 'cloudflare' | 'celld';
 	readonly root: string;
 }
 
@@ -27,7 +27,9 @@ export function cloudflareAgentsResolverPlugin(state: CloudflareAgentsResolverSt
 	return {
 		name: 'flue-cloudflare-agents-resolver',
 		async resolveId(source, _importer, options) {
-			if (state.target !== 'cloudflare') return null;
+			// The generated Worker entry (which imports `agents`) is built on
+			// both Durable Object targets: cloudflare and celld.
+			if (state.target === 'node') return null;
 			if (source !== 'agents' && !source.startsWith('agents/')) return null;
 			if (!state.root || projectReachesAgents(state.root)) return null;
 			return this.resolve(source, path.join(getPackageDir(), '__flue_agents_resolve__.mjs'), {

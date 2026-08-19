@@ -54,7 +54,7 @@ export const VIRTUAL_WORKER_ENTRY = 'virtual:flue/worker';
 // ─── State linkage ──────────────────────────────────────────────────────────
 
 /** A Flue-owned generated DO binding. */
-interface FlueDoBinding {
+export interface FlueDoBinding {
 	readonly name: string;
 	readonly class_name: string;
 }
@@ -223,8 +223,10 @@ function validateCompatibilityDate(config: Record<string, unknown>): void {
  * Add Flue's generated per-agent DO bindings, validating that any user
  * binding occupying a Flue-reserved name is exactly the binding Flue would
  * generate (harmless duplication) rather than a conflicting redirection.
+ *
+ * Shared with the celld target's deploy-config writer (celld-deploy-config.ts).
  */
-function mergeDurableObjectBindings(
+export function mergeDurableObjectBindings(
 	config: Record<string, unknown>,
 	doBindings: readonly FlueDoBinding[],
 ): void {

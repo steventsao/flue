@@ -21,6 +21,12 @@
  * project resolution and agent scan. The sibling owns the wrangler config,
  * workerd dev, build output, and preview.
  *
+ * The `'celld'` target (explicit only) builds the same generated Worker for a
+ * self-hosted celld fleet (https://celld.dev): `vite build` bundles
+ * `virtual:flue/worker` into the output directory and emits a celld-subset
+ * `wrangler.json` next to it, which `celld deploy` ships. Dev and preview are
+ * unsupported — a celld node coordinates through a real object-storage bucket.
+ *
  * Virtual modules (resolved only inside graphs this plugin serves):
  *
  * - `virtual:flue/app`    → the resolved app entry (REQUIRED to exist)
@@ -56,6 +62,7 @@ import {
 	isAgentModulePath,
 	scanAgents,
 } from './agent-scan.ts';
+import { buildCelldDeployConfig } from './celld-deploy-config.ts';
 import { cloudflareAgentsResolverPlugin } from './cloudflare-agents-resolver.ts';
 import { generateCloudflareEntry } from './cloudflare-entry.ts';
 import {
@@ -89,7 +96,7 @@ export interface FlueResolvedProjectInfo {
 	/** The resolved filesystem layout (root, source root, entries). */
 	readonly project: ResolvedFlueProject;
 	/** The selected target (explicit config, or plugin-array auto-detection). */
-	readonly target: 'node' | 'cloudflare';
+	readonly target: 'node' | 'cloudflare' | 'celld';
 	/**
 	 * The scanned `'use agent'` module set. Live in dev: reflects the latest
 	 * watcher-driven re-scan.
@@ -176,8 +183,10 @@ interface FluePluginState {
 	agents: AgentScanResult[];
 	/** Scan results grouped by normalized (posix) absolute file path. */
 	agentsByPath: Map<string, AgentScanResult[]>;
-	explicitTarget: 'node' | 'cloudflare' | undefined;
-	target: 'node' | 'cloudflare';
+	explicitTarget: 'node' | 'cloudflare' | 'celld' | undefined;
+	target: 'node' | 'cloudflare' | 'celld';
+	/** celld target only: the resolved build output directory (`wrangler.json` lands here). */
+	celldOutDir: string | undefined;
 	/** Preview mode is artifact-based: no scanning, no input generation. */
 	isPreview: boolean;
 	/** Whether the config hook took the Cloudflare path (sibling detected). */
@@ -202,6 +211,7 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 		agentsByPath: new Map(),
 		explicitTarget: undefined,
 		target: 'node',
+		celldOutDir: undefined,
 		isPreview: false,
 		cloudflarePrepared: false,
 		watchQueue: createWatchQueue(),
@@ -305,6 +315,7 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 			state.explicitTarget = merged.target;
 			state.isPreview = env.isPreview === true;
 			state.cloudflarePrepared = false;
+			state.celldOutDir = undefined;
 			state.pendingWarnings = [];
 			workerConfigSource.configReady = false;
 			workerConfigSource.isPreview = state.isPreview;
@@ -364,6 +375,47 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 				return {
 					resolve: { dedupe: RUNTIME_DEDUPE },
 					...(isBuild ? {} : { server: { cors: userConfig.server?.cors ?? DEV_CORS } }),
+				} satisfies UserConfig;
+			}
+
+			if (preliminaryTarget === 'celld') {
+				// celld runs the same generated Worker + Durable Object classes as
+				// the Cloudflare target, self-hosted (https://celld.dev). `vite
+				// build` bundles the virtual Worker entry into <outDir>/worker.mjs
+				// and the closeBundle hook emits a celld-subset wrangler.json next
+				// to it; `celld deploy <outDir>` ships the directory to the fleet.
+				// There is no local celld simulator — a node coordinates through
+				// a real object-storage bucket — so dev and preview are unsupported.
+				if (!isBuild) throw celldDevUnsupportedError();
+				if (containsCloudflarePlugin(userConfig.plugins)) throw celldCloudflareSiblingError();
+				if (project.db) throw dbOnCloudflareError('celld');
+				state.pendingWarnings.push(
+					...enforcedConfigWarnings(userConfig, ENFORCED_BUILD_CONFIG_PATHS),
+				);
+				const outDir = userConfig.build?.outDir ?? 'dist';
+				assertSafeBuildOutDir(root, project.sourceRoot, outDir);
+				state.celldOutDir = path.resolve(root, outDir);
+				return {
+					appType: 'custom',
+					resolve: { dedupe: RUNTIME_DEDUPE },
+					build: {
+						ssr: true,
+						outDir,
+						sourcemap: userConfig.build?.sourcemap ?? true,
+						target: 'esnext',
+						rolldownOptions: {
+							input: { worker: VIRTUAL_WORKER_ENTRY } as Record<string, string>,
+							// celld supplies the Workers runtime modules at execution
+							// time; everything else (the Agents SDK, @flue/runtime, user
+							// deps) bundles into the self-contained Worker artifact.
+							external: [/^node:/, /^cloudflare:/],
+							output: {
+								entryFileNames: '[name].mjs',
+								chunkFileNames: '[name]-[hash].mjs',
+								format: 'es',
+							},
+						},
+					},
 				} satisfies UserConfig;
 			}
 
@@ -506,6 +558,9 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 					);
 				}
 			}
+			if (target === 'celld' && cloudflareDetected) {
+				throw celldCloudflareSiblingError();
+			}
 		},
 
 		resolveId(source) {
@@ -542,10 +597,11 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 				return generateProvidersModule(state.project?.providers);
 			}
 			if (id === RESOLVED_WORKER_ENTRY) {
-				// The Cloudflare Worker entry. The sibling plugin points wrangler
-				// `main` here (via flueWorkerConfig()) and resolves it through
-				// Vite's plugin pipeline in both dev and build; bare imports in
-				// the generated code resolve against the user's project root.
+				// The Worker entry. On the Cloudflare target the sibling plugin
+				// points wrangler `main` here (via flueWorkerConfig()); on the
+				// celld target it is the build's input directly. Either way it
+				// resolves through Vite's plugin pipeline and bare imports in the
+				// generated code resolve against the user's project root.
 				const app = state.project?.app;
 				if (!app) throw missingAppEntryError(state.project);
 				return generateCloudflareEntry({
@@ -554,6 +610,7 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 					agents: state.agents,
 					providers: state.project.providers,
 					tracing: state.project.tracing,
+					target: state.target === 'celld' ? 'celld' : 'cloudflare',
 				});
 			}
 			return undefined;
@@ -704,10 +761,31 @@ export function flue(config: FlueConfig = {}): Plugin[] {
 			if (explanation) console.error(`[flue] ${explanation}`);
 		},
 
+		closeBundle() {
+			// celld: the build bundled the Worker; emit the deploy config next to
+			// it so the output directory is the deployable unit.
+			if (state.target !== 'celld' || state.isPreview || !state.celldOutDir) return;
+			const deployConfig = buildCelldDeployConfig({
+				root: state.root,
+				doBindings: state.agents.map((agent) => ({
+					name: agent.bindingName,
+					class_name: agent.className,
+				})),
+			});
+			fs.mkdirSync(state.celldOutDir, { recursive: true });
+			fs.writeFileSync(
+				path.join(state.celldOutDir, 'wrangler.json'),
+				`${JSON.stringify(deployConfig, null, 2)}\n`,
+			);
+			const relativeOutDir = path.relative(state.root, state.celldOutDir) || '.';
+			console.log(`[flue] deploy with: celld deploy ${relativeOutDir} --bucket <s3-or-gs-bucket>`);
+		},
+
 		configurePreviewServer(server) {
 			// Cloudflare preview is fully owned by the sibling plugin (it runs
 			// workerd over the built Worker output); flue contributes nothing.
 			if (state.target === 'cloudflare') return;
+			if (state.target === 'celld') throw celldPreviewUnsupportedError();
 			return configureNodePreview(server);
 		},
 	};
@@ -881,12 +959,46 @@ function cloudflareProviderOnNodeError(): Error {
 }
 
 /** Parity with the legacy Cloudflare build: db.ts is a Node-target concept. */
-function dbOnCloudflareError(): Error {
+function dbOnCloudflareError(targetLabel: 'Cloudflare' | 'celld' = 'Cloudflare'): Error {
 	return stackless(
 		new Error(
-			`[flue] Custom persistence (db.ts) is not supported on the Cloudflare target. ` +
-				`Cloudflare agents use Durable Object SQLite automatically. ` +
+			`[flue] Custom persistence (db.ts) is not supported on the ${targetLabel} target. ` +
+				`${targetLabel} agents use Durable Object SQLite automatically. ` +
 				`Remove the db.ts file or move it outside the source root.`,
+		),
+	);
+}
+
+/** celld has no local simulator: a node coordinates through a real bucket. */
+function celldDevUnsupportedError(): Error {
+	return stackless(
+		new Error(
+			'[flue] `vite dev` is not supported on the celld target: a celld node coordinates ' +
+				'through an object-storage bucket it owns, so there is no local runtime to develop ' +
+				'against. Run `vite build`, deploy with `celld deploy`, and iterate against a ' +
+				'running celld node (https://celld.dev/docs).',
+		),
+	);
+}
+
+/** Preview serves built artifacts through a local runtime, which celld does not have. */
+function celldPreviewUnsupportedError(): Error {
+	return stackless(
+		new Error(
+			'[flue] `vite preview` is not supported on the celld target. Run the build on a ' +
+				'celld node instead: `celld deploy <outDir>` (https://celld.dev/docs).',
+		),
+	);
+}
+
+/** The celld target bundles the Worker itself; the Cloudflare sibling must not be present. */
+function celldCloudflareSiblingError(): Error {
+	return stackless(
+		new Error(
+			"[flue] target is 'celld' but @cloudflare/vite-plugin is in the Vite plugin array. " +
+				'The celld target builds and bundles the Worker on its own — remove cloudflare() ' +
+				'(and flueWorkerConfig()):\n\n' +
+				'  plugins: [flue()]\n',
 		),
 	);
 }

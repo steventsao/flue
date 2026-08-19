@@ -10,7 +10,8 @@
  *
  * See plans/2026-07-02-vite-plugin-explicit-routing-redesign.md. Targets:
  * Node (`flue()` alone) and Cloudflare (`flue()` before a sibling
- * `cloudflare({ config: flueWorkerConfig() })` from `@cloudflare/vite-plugin`).
+ * `cloudflare({ config: flueWorkerConfig() })` from `@cloudflare/vite-plugin`),
+ * and celld (`target: 'celld'`; `flue()` alone, build-only).
  *
  * The `'use agent'` scanner (`scanAgents` and friends in `agent-scan.ts`) is
  * deliberately not public API: its only consumers are this plugin and the
